@@ -1,0 +1,7 @@
+# Snippet fuer die bestehende recorder-Konfiguration in configuration.yaml. Nicht als zweiter
+# recorder-Block einfuegen, sondern die Entity in die vorhandene Liste exclude.entities uebernehmen.
+# Der Heartbeat schreibt alle 30 s; ohne Ausschluss waechst die Recorder-DB unnoetig.
+recorder:
+  exclude:
+    entities:
+      - input_datetime.easee_service_heartbeat

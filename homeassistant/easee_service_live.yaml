@@ -1,0 +1,21 @@
+  - triggers:
+      - trigger: time_pattern
+        seconds: "/30"
+      - trigger: state
+        entity_id: input_datetime.easee_service_heartbeat
+    variables:
+      heartbeat_entity: input_datetime.easee_service_heartbeat
+      heartbeat_hoechstalter_sekunden: 120
+      ohne_heartbeat_sekunden: 999999
+    binary_sensor:
+      - name: "Easee Service live"
+        unique_id: easee_service_live
+        device_class: connectivity
+        state: >-
+          {% set zeitstempel = state_attr(heartbeat_entity, 'timestamp') %}
+          {% set alter_sekunden = (now().timestamp() - zeitstempel) if zeitstempel is number else none %}
+          {{ alter_sekunden is not none and alter_sekunden < heartbeat_hoechstalter_sekunden }}
+        attributes:
+          sekunden_seit_letztem_heartbeat: >-
+            {% set zeitstempel = state_attr(heartbeat_entity, 'timestamp') %}
+            {{ ((now().timestamp() - zeitstempel) | round(0) | int) if zeitstempel is number else ohne_heartbeat_sekunden }}
