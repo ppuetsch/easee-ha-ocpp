@@ -13,6 +13,8 @@ import org.springframework.stereotype.Component
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
+import java.util.concurrent.ScheduledExecutorService
+import java.util.concurrent.TimeUnit
 
 private const val METER_VALUES_SAMPLED_DATA_VALUE =
     "Power.Active.Import,Current.Import,Voltage,Current.Offered,Energy.Active.Import.Register"
@@ -33,7 +35,29 @@ class ChargerBootstrapper(
 ) {
     private val logger = LoggerFactory.getLogger(javaClass)
     private val executor: ExecutorService = Executors.newCachedThreadPool()
+    private val delayScheduler: ScheduledExecutorService = Executors.newSingleThreadScheduledExecutor()
     private val bootstrappedSessionByChargerId = ConcurrentHashMap<ChargerId, OcppChargerSession>()
+
+    /**
+     * Ein Charger, der nur den WebSocket neu aufbaut (z. B. nach einem Neustart des Service), sendet laut OCPP keine
+     * neue BootNotification und bleibt bis zum nächsten Heartbeat stumm. Deshalb startet die Konfiguration kurz nach
+     * dem Verbindungsaufbau von selbst, falls bis dahin noch nichts passiert ist.
+     */
+    fun scheduleOnConnect(chargerId: ChargerId) {
+        delayScheduler.schedule(
+            { bootstrapOnceAsync(chargerId) },
+            settings.ocpp.connectBootstrapDelay.toMillis(),
+            TimeUnit.MILLISECONDS,
+        )
+    }
+
+    /** Eine echte BootNotification (Neustart des Chargers) löst die Konfiguration immer erneut aus. */
+    @Synchronized
+    fun bootstrapAfterBoot(chargerId: ChargerId) {
+        val session = sessions.find(chargerId) ?: return
+        bootstrappedSessionByChargerId[chargerId] = session
+        executor.execute { bootstrap(chargerId) }
+    }
 
     /** Startet die Konfigurationsfolge höchstens einmal pro Sitzung. Liefert false, wenn sie für diese Sitzung schon gestartet wurde. */
     @Synchronized
@@ -57,6 +81,7 @@ class ChargerBootstrapper(
 
     @PreDestroy
     fun shutdown() {
+        delayScheduler.shutdownNow()
         executor.shutdownNow()
     }
 

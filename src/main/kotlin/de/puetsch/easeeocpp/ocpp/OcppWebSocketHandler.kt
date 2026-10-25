@@ -33,6 +33,7 @@ class OcppWebSocketHandler(
         webSocket.attributes[OCPP_SESSION_ATTRIBUTE] = ocppSession
         sessions.register(ocppSession)?.closeReplaced()
         logger.info("Charger {} verbunden", chargePointId)
+        bootstrapper.scheduleOnConnect(chargePointId)
     }
 
     override fun afterConnectionClosed(webSocket: WebSocketSession, status: CloseStatus) {
@@ -71,7 +72,10 @@ class OcppWebSocketHandler(
     private fun answerCall(ocppSession: OcppChargerSession, call: OcppFrame.Call) {
         val reply = router.route(ocppSession.chargePointId, call)
         ocppSession.sendFrame(reply)
-        if (reply is OcppFrame.CallResult) {
+        if (reply !is OcppFrame.CallResult) return
+        if (call.action == OcppActions.BOOT_NOTIFICATION) {
+            bootstrapper.bootstrapAfterBoot(ocppSession.chargePointId)
+        } else {
             bootstrapper.bootstrapOnceAsync(ocppSession.chargePointId)
         }
     }

@@ -18,6 +18,12 @@
 .PARAMETER DryRun
     Zeigt nur die Kommandos an, fuehrt nichts aus, liest keine Secrets und prueft die Keystore-Datei nicht.
 
+.PARAMETER CheckOnly
+    Fuehrt nur den Post-Deployment-Check gegen den laufenden Service aus (Version und Health), ohne zu deployen.
+
+.PARAMETER ExpectedVersion
+    Erwarteter Short-SHA. Standard: HEAD dieses Repos (mit -Local und uncommitteten Aenderungen mit Suffix -dirty).
+
 .PARAMETER Actuate
     Setzt ACTUATION_ENABLED=true. Standard ist der Schattenmodus (false).
 
@@ -42,7 +48,8 @@ param(
     [switch] $Actuate,
     [switch] $Force,
     [switch] $PlainOcpp,
-    [string] $ExpectedVersion = ''
+    [string] $ExpectedVersion = '',
+    [switch] $CheckOnly
 )
 
 $ErrorActionPreference = 'Stop'
@@ -300,7 +307,9 @@ function Show-Logs {
 function Get-ServiceJson([string] $Path) {
     $url = "http://${DockerHost}:${HTTP_PORT}$Path"
     $response = Invoke-WebRequest -Uri $url -UseBasicParsing -TimeoutSec $VERSION_CHECK_REQUEST_TIMEOUT_SECONDS
-    return @{ Status = [int]$response.StatusCode; Body = ($response.Content | ConvertFrom-Json) }
+    # Actuator liefert einen herstellerspezifischen Content-Type; PowerShell 5.1 gibt den Inhalt dann als Bytes zurueck.
+    $text = if ($response.Content -is [byte[]]) { [System.Text.Encoding]::UTF8.GetString($response.Content) } else { [string]$response.Content }
+    return @{ Status = [int]$response.StatusCode; Body = ($text | ConvertFrom-Json) }
 }
 
 function Test-ServiceMatchesVersion([string] $Version) {
@@ -332,6 +341,10 @@ function Assert-ServiceRunsVersion([string] $Version) {
 
 function Invoke-Deployment {
     $script:VersionToDeploy = Resolve-ExpectedVersion
+    if ($CheckOnly) {
+        Assert-ServiceRunsVersion $script:VersionToDeploy
+        return
+    }
     Assert-DeploymentPolicy
     if (-not $PlainOcpp) { Assert-KeystoreFilePresent }
     Stop-LegacyContainerIfRequested

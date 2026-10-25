@@ -1,6 +1,7 @@
 package de.puetsch.easeeocpp.ocpp
 
 import de.puetsch.easeeocpp.config.AppProperties
+import de.puetsch.easeeocpp.config.OcppProperties
 import de.puetsch.easeeocpp.ocpp.messages.ChangeConfigurationRequest
 import de.puetsch.easeeocpp.ocpp.messages.OcppConfigurationKeys
 import de.puetsch.easeeocpp.ocpp.messages.OcppRequestedMessages
@@ -182,6 +183,28 @@ class ChargerBootstrapperTest {
         registry.unregister(session)
 
         assertFalse(bootstrapper.bootstrapOnceAsync(CHARGER_ID))
+    }
+
+    @Test
+    @Story("Stiller Charger nach Reconnect")
+    fun `scheduleOnConnect startet die Konfiguration von selbst`() {
+        val settings = AppProperties(ocpp = OcppProperties(connectBootstrapDelay = Duration.ofMillis(50)))
+        bootstrapper = ChargerBootstrapper(registry, profiles, settings)
+
+        bootstrapper.scheduleOnConnect(CHARGER_ID)
+
+        awaitActions(BOOTSTRAP_CALLS)
+    }
+
+    @Test
+    @Story("Stiller Charger nach Reconnect")
+    fun `bootstrapAfterBoot laeuft auch nach bereits gestarteter Konfiguration erneut`() {
+        assertTrue(bootstrapper.bootstrapOnceAsync(CHARGER_ID))
+        awaitActions(BOOTSTRAP_CALLS)
+
+        bootstrapper.bootstrapAfterBoot(CHARGER_ID)
+
+        awaitActions(2 * BOOTSTRAP_CALLS)
     }
 
     private fun createBootstrapper() {

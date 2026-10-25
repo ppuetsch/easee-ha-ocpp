@@ -73,6 +73,7 @@ data class OcppProperties(
     val useNumberPhases: Boolean = false,
     val requestTimeout: Duration = Duration.ofSeconds(30),
     val meterValueMaxAge: Duration = Duration.ofSeconds(90),
+    val connectBootstrapDelay: Duration = Duration.ofSeconds(5),
     val ssl: OcppSslProperties = OcppSslProperties(),
 )
 
