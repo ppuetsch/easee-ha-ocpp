@@ -2,12 +2,12 @@ package de.puetsch.easeeocpp.testsupport
 
 import de.puetsch.easeeocpp.ocpp.OCPP_SUBPROTOCOL
 import de.puetsch.easeeocpp.ocpp.OcppActions
+import de.puetsch.easeeocpp.ocpp.OcppErrorCode
 import de.puetsch.easeeocpp.ocpp.OcppFrame
 import de.puetsch.easeeocpp.ocpp.OcppFrameCodec
 import de.puetsch.easeeocpp.ocpp.OcppJson
 import de.puetsch.easeeocpp.ocpp.ParseOutcome
 import de.puetsch.easeeocpp.ocpp.callErrorFrame
-import de.puetsch.easeeocpp.ocpp.OcppErrorCode
 import org.java_websocket.client.WebSocketClient
 import org.java_websocket.drafts.Draft_6455
 import org.java_websocket.handshake.ServerHandshake
@@ -34,6 +34,7 @@ private val ANSWERED_ACTIONS = setOf(
 /**
  * Simulierter Easee-Charger als OCPP-1.6J-Client ohne TLS. Beantwortet ChangeConfiguration, TriggerMessage und
  * SetChargingProfile; [rejectedActions] steuert, welche Aufrufe mit `Rejected` beantwortet werden.
+ * Jede Verbindung braucht eine eigene Instanz, ein WebSocketClient ist nach Close nicht wiederverwendbar.
  */
 class FakeCharger(
     serverUri: URI,
@@ -46,6 +47,11 @@ class FakeCharger(
 ) {
     val receivedCalls: MutableList<OcppFrame.Call> = CopyOnWriteArrayList()
     val rejectedActions: MutableSet<String> = ConcurrentHashMap.newKeySet()
+
+    /** Close-Code, mit dem der Server (oder der Client) die Verbindung beendet hat; null solange offen. */
+    @Volatile
+    var closeCode: Int? = null
+        private set
     private val pendingReplies = ConcurrentHashMap<String, CompletableFuture<OcppFrame>>()
 
     fun connectAndWait(): Boolean = connectBlocking(CONNECT_TIMEOUT_SECONDS, TimeUnit.SECONDS)
@@ -77,7 +83,9 @@ class FakeCharger(
         }
     }
 
-    override fun onClose(code: Int, reason: String?, remote: Boolean) = Unit
+    override fun onClose(code: Int, reason: String?, remote: Boolean) {
+        closeCode = code
+    }
 
     override fun onError(ex: Exception?) = Unit
 
