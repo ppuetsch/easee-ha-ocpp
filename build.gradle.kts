@@ -64,3 +64,11 @@ tasks.jacocoTestReport {
         html.required = true
     }
 }
+
+tasks.register<JavaExec>("installPlaywrightBrowsers") {
+    group = "verification"
+    description = "Installiert den Chromium-Browser für Playwright inklusive Systemabhängigkeiten."
+    classpath = configurations.getByName("testRuntimeClasspath")
+    mainClass = "com.microsoft.playwright.CLI"
+    args("install", "--with-deps", "chromium")
+}

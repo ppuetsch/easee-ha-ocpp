@@ -1,0 +1,147 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+env:
+  ALLURE_VERSION: "2.35.1"
+  IMAGE_NAME: ghcr.io/${{ github.repository }}
+
+jobs:
+  test:
+    name: Build und Tests
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Repository auschecken
+        uses: actions/checkout@v7
+
+      - name: JDK 25 (Temurin) einrichten
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: "25"
+
+      - name: Gradle einrichten und Cache verwalten
+        uses: gradle/actions/setup-gradle@v6
+
+      - name: Playwright-Browser-Cache wiederherstellen
+        uses: actions/cache@v6
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('build.gradle.kts') }}
+
+      - name: Playwright-Browser installieren
+        run: ./gradlew installPlaywrightBrowsers --console=plain
+
+      - name: Tests und Qualitätsprüfungen ausführen
+        run: ./gradlew check --console=plain
+
+      - name: JUnit-XML-Berichte hochladen
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: junit-xml
+          path: build/test-results/
+          if-no-files-found: ignore
+
+      - name: Allure-CLI laden
+        if: always()
+        run: |
+          curl --fail --silent --show-error --location \
+            --output "$RUNNER_TEMP/allure.zip" \
+            "https://repo1.maven.org/maven2/io/qameta/allure/allure-commandline/${ALLURE_VERSION}/allure-commandline-${ALLURE_VERSION}.zip"
+          unzip -q "$RUNNER_TEMP/allure.zip" -d "$RUNNER_TEMP/allure-dist"
+          chmod +x "$RUNNER_TEMP/allure-dist/allure-${ALLURE_VERSION}/bin/allure"
+          echo "$RUNNER_TEMP/allure-dist/allure-${ALLURE_VERSION}/bin" >> "$GITHUB_PATH"
+
+      - name: Allure-Ergebnisse hochladen
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: allure-results
+          path: build/allure-results/
+          if-no-files-found: ignore
+
+      - name: Allure-HTML-Report erzeugen
+        if: always() && hashFiles('build/allure-results/**') != ''
+        run: allure generate build/allure-results -o build/allure-report --clean
+
+      - name: Allure-HTML-Report hochladen
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: allure-report
+          path: build/allure-report/
+          if-no-files-found: ignore
+
+      - name: JaCoCo-Report hochladen
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: jacoco-report
+          path: build/reports/jacoco/
+          if-no-files-found: ignore
+
+      - name: Playwright-Traces und Screenshots hochladen
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: playwright-traces
+          path: build/playwright/
+          if-no-files-found: ignore
+
+  docker:
+    name: Docker-Image nach GHCR
+    needs: test
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Repository auschecken
+        uses: actions/checkout@v7
+
+      - name: Bei GHCR anmelden
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Image-Tags und Labels ermitteln
+        id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ${{ env.IMAGE_NAME }}
+          tags: |
+            type=raw,value=latest
+            type=sha
+
+      - name: Image bauen und pushen
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+
+  python-tests:
+    name: Home-Assistant-Skripte (Python)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Repository auschecken
+        uses: actions/checkout@v7
+
+      - name: Python-Tests ausführen, falls homeassistant/ existiert
+        run: |
+          if [ ! -d homeassistant ]; then
+            echo "Verzeichnis homeassistant/ fehlt, Python-Tests übersprungen."
+            exit 0
+          fi
+          python -m unittest discover homeassistant

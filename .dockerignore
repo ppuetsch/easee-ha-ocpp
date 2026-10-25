@@ -1,0 +1,24 @@
+# Build-Artefakte und Caches
+build/
+.gradle/
+.kotlin/
+.idea/
+allure-results/
+allure-report/
+
+# Git, CI und Deploy gehoeren nicht ins Image
+.git/
+.github/
+.claude/
+deploy/
+docs/
+homeassistant/
+
+# Laufzeitdaten und Schluessel: niemals ins Build-Kontext-Image kopieren
+data/
+secrets/
+*.p12
+*.pem
+*.env
+.env*
+*.log
