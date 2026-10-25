@@ -80,6 +80,7 @@ class ControlLoop(
     }
 
     private fun executeCycle(now: Instant) {
+        chargerFleet.requestFreshMeasurements()
         val snapshots = chargerFleet.snapshots()
         when {
             connectionProblems.connectionProblem() != null ->

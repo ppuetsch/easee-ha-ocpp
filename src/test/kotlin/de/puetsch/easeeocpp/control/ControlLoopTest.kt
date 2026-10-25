@@ -76,7 +76,7 @@ class ControlLoopTest {
 
     @Test
     @Story("Settle-Delay")
-    fun `settle delay blocks every change until fifteen seconds have passed`() {
+    fun `settle delay blocks every change until ten seconds have passed`() {
         val harness = harness()
         harness.runCycle()
         harness.charging.calls.clear()
@@ -94,7 +94,7 @@ class ControlLoopTest {
         harness.runCycle()
 
         assertEquals(listOf("limit:$MULTONNEN_ID:10", "limit:$EINGANGSSEITE_ID:0"), harness.charging.calls)
-        assertEquals(CONTROL_START.plusSeconds(30), harness.state().settleUntil)
+        assertEquals(CONTROL_START.plusSeconds(25), harness.state().settleUntil)
     }
 
     @Test
