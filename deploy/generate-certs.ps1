@@ -12,9 +12,10 @@
     Serverzertifikats (mit -Verify pruefen) mit -Force neu erzeugen und danach
     deploy.ps1 und activate-easee-ocpp.ps1 erneut ausfuehren.
 
-    Passwort: User-Umgebungsvariable KEYSTORE_PASSWORD. Fehlt sie, wird ein Passwort
-    erzeugt und EINMAL ausgegeben; es muss dann als KEYSTORE_PASSWORD gespeichert werden,
-    sonst laesst sich der CA-Keystore beim Erneuern nicht oeffnen.
+    Passwort: User-Umgebungsvariable KEYSTORE_PASSWORD. Fehlt sie, wird ein Passwort erzeugt
+    und als User-Umgebungsvariable gespeichert (der Wert erscheint nicht in der Ausgabe).
+    Existiert die CA bereits und fehlt die Variable, bricht das Skript ab, weil der
+    CA-Keystore nur mit dem bisherigen Passwort geoeffnet werden kann.
 
 .PARAMETER OutputDir
     Zielverzeichnis fuer keystore.p12 und ca.pem (Standard: <Repo>/secrets).
@@ -79,12 +80,25 @@ function Get-ConfiguredPassword {
     return [Environment]::GetEnvironmentVariable($PASSWORD_SOURCE_VARIABLE, 'User')
 }
 
+function Assert-NoExistingCaWithoutPassword {
+    $caKeystorePath = Join-Path $CaDirectory $CA_KEYSTORE_FILE_NAME
+    if (Test-Path -LiteralPath $caKeystorePath) {
+        throw "KEYSTORE_PASSWORD fehlt, die CA $caKeystorePath existiert aber bereits und laesst sich nur mit dem bisherigen Passwort oeffnen."
+    }
+}
+
+function Save-GeneratedPassword([string] $Password) {
+    [Environment]::SetEnvironmentVariable($PASSWORD_SOURCE_VARIABLE, $Password, 'User')
+    Write-Host "KEYSTORE_PASSWORD war nicht gesetzt: Passwort erzeugt und als User-Umgebungsvariable gespeichert."
+    Write-Host "Der Wert wird aus Sicherheitsgruenden nicht ausgegeben. Ein neues Terminal oeffnen, damit er wirksam ist."
+}
+
 function Resolve-IssuancePassword {
     $configured = Get-ConfiguredPassword
     if (-not [string]::IsNullOrEmpty($configured)) { return $configured }
+    Assert-NoExistingCaWithoutPassword
     $generated = New-RandomPassword
-    Write-Host "KEYSTORE_PASSWORD war nicht gesetzt. Einmalig generiert; bitte als User-Umgebungsvariable speichern:"
-    Write-Host $generated
+    Save-GeneratedPassword $generated
     return $generated
 }
 

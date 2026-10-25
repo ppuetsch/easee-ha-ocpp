@@ -13,7 +13,10 @@ RUN --mount=type=cache,target=/root/.gradle \
 FROM eclipse-temurin:25-jre AS runtime
 ARG APP_UID=10001
 ARG APP_GID=10001
-ENV SERVER_PORT=8080
+# Die Anwendung nutzt sonst relative Pfade (secrets/, data/) unter /app; die Volumes liegen unter /secrets und /data.
+ENV SERVER_PORT=8080 \
+    EASEE_OCPP_SSL_KEYSTOREPATH=/secrets/keystore.p12 \
+    EASEE_CONTROL_HISTORYFILE=/data/control-history.jsonl
 
 RUN apt-get update \
  && apt-get install -y --no-install-recommends curl ca-certificates \

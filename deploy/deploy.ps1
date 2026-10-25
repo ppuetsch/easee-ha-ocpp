@@ -8,24 +8,39 @@
     `docker save | docker load`. Secrets kommen aus den lokalen User-Umgebungsvariablen,
     werden in eine temporaere env-Datei geschrieben, per scp nach ~/easee-ha-ocpp.env
     (Rechte 600) uebertragen und nur ueber `docker run --env-file` uebergeben.
-    Ohne -StopLegacy bricht das Skript ab, solange der alte Regler pv-surcharge laeuft
-    (zwei Regler duerfen nie parallel laufen).
+    Der Keystore wird nach ~/easee-secrets/ kopiert (Besitzer uid 10001, Rechte 640).
+
+    Parallelbetrieb: Der Schattenmodus (Standard, ohne -Actuate) sendet nichts an Charger
+    und Easee-Cloud und darf daher parallel zum alten Regler pv-surcharge laufen.
+    Mit -Actuate ist ein laufender pv-surcharge nur mit -StopLegacy zulaessig.
+    -StopLegacy ohne -Actuate stoppt den alten Regler, ohne dass der neue regelt; das wird bestaetigt.
 
 .PARAMETER DryRun
-    Zeigt nur die Kommandos an, fuehrt nichts aus und liest keine Secrets.
+    Zeigt nur die Kommandos an, fuehrt nichts aus, liest keine Secrets und prueft die Keystore-Datei nicht.
 
 .PARAMETER Actuate
     Setzt ACTUATION_ENABLED=true. Standard ist der Schattenmodus (false).
+
+.PARAMETER StopLegacy
+    Stoppt und entfernt den alten Container pv-surcharge.
+
+.PARAMETER KeystorePath
+    Lokaler Pfad zum Server-Keystore (relativ zum Repo-Root). Standard: secrets/keystore.p12.
+
+.PARAMETER Force
+    Unterdrueckt die Bestaetigungsabfrage bei -StopLegacy ohne -Actuate.
 #>
 [CmdletBinding()]
 param(
     [string] $DockerHost = 'docker.fritz.box',
     [string] $SshUser = 'root',
     [string] $Image = 'ghcr.io/ppuetsch/easee-ha-ocpp:latest',
+    [string] $KeystorePath = 'secrets/keystore.p12',
     [switch] $Local,
     [switch] $StopLegacy,
     [switch] $DryRun,
-    [switch] $Actuate
+    [switch] $Actuate,
+    [switch] $Force
 )
 
 $ErrorActionPreference = 'Stop'
@@ -34,6 +49,12 @@ $CONTAINER_NAME = 'easee-ha-ocpp'
 $LEGACY_CONTAINER_NAME = 'pv-surcharge'
 $REMOTE_ENV_FILE_NAME = 'easee-ha-ocpp.env'
 $REMOTE_SECRETS_DIR = '~/easee-secrets'
+$REMOTE_SECRETS_SCP_DIR = 'easee-secrets'
+$KEYSTORE_FILE_NAME = 'keystore.p12'
+$CONTAINER_UID = 10001
+$KEYSTORE_FILE_MODE = '640'
+$SECRETS_DIR_MODE = '750'
+$CONFIRMATION_ANSWERS = @('j', 'ja', 'y', 'yes')
 $HTTP_PORT = 8080
 $OCPP_TLS_PORT = 8443
 $DATA_VOLUME = 'easee-data'
@@ -118,13 +139,69 @@ function Remove-TempEnvFile([string] $Path) {
     if ($Path -and (Test-Path -LiteralPath $Path)) { Remove-Item -LiteralPath $Path -Force }
 }
 
-function Assert-LegacyContainerStopped {
+function Test-LegacyContainerRunning {
     $runningLegacy = Invoke-Remote "docker ps --filter 'name=^$LEGACY_CONTAINER_NAME`$' --format '{{.Names}}'"
-    if ([string]::IsNullOrWhiteSpace([string]$runningLegacy)) { return }
-    if (-not $StopLegacy) {
-        throw "Der alte Container '$LEGACY_CONTAINER_NAME' laeuft noch. Mit -StopLegacy stoppen und entfernen."
+    return -not [string]::IsNullOrWhiteSpace([string]$runningLegacy)
+}
+
+function Assert-ActuationAllowed([bool] $LegacyRunning) {
+    if ($LegacyRunning -and $Actuate -and -not $StopLegacy) {
+        throw "Der alte Container '$LEGACY_CONTAINER_NAME' laeuft noch. Mit -Actuate nur zusammen mit -StopLegacy starten, zwei Regler duerfen nicht aktiv regeln."
     }
+}
+
+function Confirm-UnregulatedStop {
+    Write-Warning "-StopLegacy ohne -Actuate: '$LEGACY_CONTAINER_NAME' wird gestoppt, der neue Service sendet im Schattenmodus nichts. Danach regelt niemand."
+    if ($Force) { return }
+    if ($DryRun) {
+        Write-DryRunCommand 'Bestaetigungsabfrage (im DryRun uebersprungen)'
+        return
+    }
+    $answer = Read-Host 'Trotzdem fortfahren? (j/N)'
+    if ($CONFIRMATION_ANSWERS -notcontains $answer.Trim().ToLowerInvariant()) {
+        throw 'Abgebrochen, es wurde nichts geaendert.'
+    }
+}
+
+function Assert-DeploymentPolicy {
+    Assert-ActuationAllowed (Test-LegacyContainerRunning)
+    if ($StopLegacy -and -not $Actuate) { Confirm-UnregulatedStop }
+}
+
+function Stop-LegacyContainerIfRequested {
+    if (-not $StopLegacy) { return }
+    if (-not (Test-LegacyContainerRunning)) { return }
     Invoke-Remote "docker rm -f $LEGACY_CONTAINER_NAME"
+}
+
+function Resolve-KeystoreSourcePath {
+    if ([System.IO.Path]::IsPathRooted($KeystorePath)) { return $KeystorePath }
+    return Join-Path $PROJECT_ROOT $KeystorePath
+}
+
+function Assert-KeystoreFilePresent {
+    if ($DryRun) {
+        Write-DryRunCommand 'Pruefung der Keystore-Datei (im DryRun nicht ausgefuehrt)'
+        return
+    }
+    $path = Resolve-KeystoreSourcePath
+    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
+        throw "Keystore-Datei fehlt: $path. Erst deploy/generate-certs.ps1 ausfuehren oder -KeystorePath setzen."
+    }
+}
+
+function Send-KeystoreFile {
+    $localPath = Resolve-KeystoreSourcePath
+    $remoteFile = "$REMOTE_SECRETS_SCP_DIR/$KEYSTORE_FILE_NAME"
+    Invoke-Remote "mkdir -p $REMOTE_SECRETS_DIR && chown ${CONTAINER_UID}:${CONTAINER_UID} $REMOTE_SECRETS_DIR && chmod $SECRETS_DIR_MODE $REMOTE_SECRETS_DIR"
+    if ($DryRun) {
+        Write-DryRunCommand "scp <lokaler Keystore> $(Get-SshTarget):$remoteFile"
+    }
+    else {
+        & scp $localPath "$(Get-SshTarget):$remoteFile"
+        if ($LASTEXITCODE -ne 0) { throw "scp des Keystores fehlgeschlagen (Exit $LASTEXITCODE)" }
+    }
+    Invoke-Remote "chown ${CONTAINER_UID}:${CONTAINER_UID} $REMOTE_SECRETS_DIR/$KEYSTORE_FILE_NAME && chmod $KEYSTORE_FILE_MODE $REMOTE_SECRETS_DIR/$KEYSTORE_FILE_NAME"
 }
 
 function Publish-Image {
@@ -191,9 +268,12 @@ function Show-Logs {
 }
 
 function Invoke-Deployment {
-    Assert-LegacyContainerStopped
+    Assert-DeploymentPolicy
+    Assert-KeystoreFilePresent
+    Stop-LegacyContainerIfRequested
     Publish-Image
     Deploy-WithEnvFile
+    Send-KeystoreFile
     Replace-Container
     Invoke-Remote "docker ps --filter 'name=^$CONTAINER_NAME`$' --format '{{.Status}}'"
     Show-Logs
