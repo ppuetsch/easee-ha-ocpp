@@ -138,6 +138,14 @@ jobs:
       - name: Repository auschecken
         uses: actions/checkout@v7
 
+      - name: Python einrichten
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+
+      - name: Python-Abhängigkeiten installieren
+        run: pip install websocket-client
+
       - name: Python-Tests ausführen, falls homeassistant/ existiert
         run: |
           if [ ! -d homeassistant ]; then
