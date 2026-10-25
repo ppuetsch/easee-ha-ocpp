@@ -102,7 +102,7 @@ class ControlLoop(
     }
 
     private fun evaluateAndActuate(now: Instant, readings: HaReadings, snapshots: List<ChargerSnapshot>) {
-        val evaluation = cycle.evaluate(readings, snapshots, now)
+        val evaluation = cycle.evaluate(readings, snapshots, now, tracker.lastLimits())
         val actions = if (tracker.isSettling(now)) emptyList() else actuate(now, evaluation.decision)
         actions.forEach(history::record)
         stateHolder.update { previous ->

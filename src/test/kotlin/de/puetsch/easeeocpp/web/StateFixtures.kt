@@ -124,6 +124,7 @@ object StateFixtures {
         ),
         phaseWithHighestVoltage = 2,
         reason = "Überschuss reicht für 6 A",
+        allocationMode = "PRIORITIZED",
     )
 
     private fun lastAction(now: Instant): ControlAction = ControlAction(

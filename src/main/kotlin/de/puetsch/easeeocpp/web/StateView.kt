@@ -24,6 +24,7 @@ data class ChargerView(
     val verbindung: String,
     val verbindungKlasse: String,
     val status: String,
+    val autoAngesteckt: String,
     val leistung: String,
     val letzterMesswert: String,
 )
@@ -47,6 +48,7 @@ data class ResultView(
     val rohleistung: String,
     val zielleistung: String,
     val zielstrom: String,
+    val verteilungsmodus: String,
     val verteilung: List<VerteilungView>,
     val phaseHoechsteSpannung: String,
     val begruendung: String,

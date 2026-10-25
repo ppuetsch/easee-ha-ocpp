@@ -10,8 +10,11 @@ import de.puetsch.easeeocpp.domain.model.PhaseMode
 private const val CHARGERS_NEEDING_MINIMUM_FOR_REBALANCE = 2
 
 /**
- * Verteilt den Gesamtstrom auf zwei Charger: der Prio-Charger bekommt bis zu seiner Phasen-Obergrenze,
- * der Rest geht an den anderen. Die Summe bleibt durch die Circuit-Grenze pro Phase begrenzt.
+ * Verteilt den Gesamtstrom auf zwei Charger.
+ * - Ein eligibler Charger bekommt den Gesamtstrom, gekappt auf seine Phasen-Obergrenze (Prio-Konfiguration egal).
+ * - Zwei eligible, priorisiert: der Prio-Charger bekommt bis zu seiner Obergrenze, der Rest geht an den anderen.
+ * - Zwei eligible, geteilt: beide bekommen den Gesamtstrom als Limit, jeweils gekappt. Die Regelung über die
+ *   Netzmessung gleicht die Summe aus; die Circuit-Grenze gilt dann pro Charger, nicht für die Summe.
  * Ausgelegt auf genau zwei Charger (der "andere" ist der erste nicht-prioritäre Charger).
  */
 class CurrentAllocator(private val properties: ControlProperties) {
@@ -22,6 +25,7 @@ class CurrentAllocator(private val properties: ControlProperties) {
         priorityCharger: ChargerId,
         chargerIds: List<ChargerId>,
         eligible: Set<ChargerId>,
+        sharedMode: Boolean,
     ): AllocationResult {
         val otherCharger = chargerIds.firstOrNull { it != priorityCharger }
         val split = split(
@@ -29,6 +33,7 @@ class CurrentAllocator(private val properties: ControlProperties) {
             priorityCap = priorityCap(phaseMode),
             priorityEligible = priorityCharger in eligible,
             otherEligible = otherCharger != null && otherCharger in eligible,
+            sharedMode = sharedMode,
         )
         val limits = chargerIds.map { chargerId ->
             ChargerLimit(chargerId, currentFor(chargerId, priorityCharger, otherCharger, split))
@@ -58,20 +63,27 @@ class CurrentAllocator(private val properties: ControlProperties) {
         priorityCap: Ampere,
         priorityEligible: Boolean,
         otherEligible: Boolean,
+        sharedMode: Boolean,
     ): CurrentSplit = when {
         !priorityEligible && !otherEligible -> CurrentSplit(priority = 0, other = 0)
-        !priorityEligible -> CurrentSplit(priority = 0, other = otherCharge(total, priorityCap))
-        !otherEligible -> CurrentSplit(priority = priorityCharge(total, priorityCap), other = 0)
-        else -> splitBetweenBothEligible(total, priorityCap)
+        !priorityEligible -> CurrentSplit(priority = 0, other = cappedOrZero(total, priorityCap))
+        !otherEligible -> CurrentSplit(priority = cappedOrZero(total, priorityCap), other = 0)
+        sharedMode -> sharedSplit(total, priorityCap)
+        else -> prioritizedSplit(total, priorityCap)
     }
 
-    private fun splitBetweenBothEligible(total: Ampere, priorityCap: Ampere): CurrentSplit {
-        val priority = priorityCharge(total, priorityCap)
+    private fun sharedSplit(total: Ampere, priorityCap: Ampere): CurrentSplit {
+        val eachCharger = cappedOrZero(total, priorityCap)
+        return CurrentSplit(priority = eachCharger, other = eachCharger)
+    }
+
+    private fun prioritizedSplit(total: Ampere, priorityCap: Ampere): CurrentSplit {
+        val priority = cappedOrZero(total, priorityCap)
         val rest = total - priority
         if (shouldRebalanceForMinCurrent(total, rest)) {
             return CurrentSplit(priority = total - properties.minChargeCurrent, other = properties.minChargeCurrent)
         }
-        return CurrentSplit(priority = priority, other = otherCharge(rest, priorityCap))
+        return CurrentSplit(priority = priority, other = cappedOrZero(rest, priorityCap))
     }
 
     /**
@@ -83,11 +95,8 @@ class CurrentAllocator(private val properties: ControlProperties) {
             rest < properties.minChargeCurrent &&
             total >= CHARGERS_NEEDING_MINIMUM_FOR_REBALANCE * properties.minChargeCurrent
 
-    private fun priorityCharge(total: Ampere, priorityCap: Ampere): Ampere =
-        belowMinimumToZero(minOf(total, priorityCap))
-
     /** Beide Charger hängen an derselben Phasen-Konfiguration, daher gilt für beide dieselbe Obergrenze. */
-    private fun otherCharge(amount: Ampere, priorityCap: Ampere): Ampere =
+    private fun cappedOrZero(amount: Ampere, priorityCap: Ampere): Ampere =
         belowMinimumToZero(minOf(amount, priorityCap))
 
     private fun belowMinimumToZero(amount: Ampere): Ampere =

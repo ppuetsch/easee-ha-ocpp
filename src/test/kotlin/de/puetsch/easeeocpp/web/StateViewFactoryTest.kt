@@ -45,6 +45,35 @@ class StateViewFactoryTest {
     }
 
     @Test
+    @Story("Auto angesteckt")
+    fun `angesteckt-status je Charger folgt dem Ladestatus`() {
+        val view = factory.create(StateFixtures.fullState(now))
+
+        assertEquals("ja", view.verbindungen.chargers.first().autoAngesteckt)
+        assertEquals("nein", view.verbindungen.chargers.last().autoAngesteckt)
+    }
+
+    @Test
+    @Story("Verteilungsmodus")
+    fun `verteilungsmodus wird als deutsches Wort angezeigt`() {
+        assertEquals("Priorisiert", verteilungsmodusFor("PRIORITIZED"))
+        assertEquals("Geteilt", verteilungsmodusFor("SHARED"))
+        assertEquals("Ein Auto", verteilungsmodusFor("SINGLE_CHARGER"))
+    }
+
+    @Test
+    @Story("Verteilungsmodus")
+    fun `fehlender verteilungsmodus zeigt den Platzhalter`() {
+        assertEquals(FALLBACK_TEXT, verteilungsmodusFor(null))
+    }
+
+    private fun verteilungsmodusFor(allocationMode: String?): String {
+        val state = StateFixtures.fullState(now)
+        val withMode = state.copy(decision = state.decision?.copy(allocationMode = allocationMode))
+        return factory.create(withMode).ergebnis.verteilungsmodus
+    }
+
+    @Test
     @Story("Historie")
     fun `historie ist neueste zuerst sortiert`() {
         val view = factory.create(StateFixtures.fullState(now))

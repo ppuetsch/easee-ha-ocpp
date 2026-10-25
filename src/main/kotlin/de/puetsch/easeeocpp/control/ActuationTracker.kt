@@ -39,6 +39,8 @@ class ActuationTracker(private val settleDelay: Duration) {
         lastLimits[chargerId] = current
     }
 
+    fun lastLimits(): Map<ChargerId, Ampere> = lastLimits.toMap()
+
     fun refreshDue(now: Instant, refreshInterval: Duration): Boolean {
         val lastAttempt = lastLimitAttemptAt ?: return true
         return Duration.between(lastAttempt, now) > refreshInterval

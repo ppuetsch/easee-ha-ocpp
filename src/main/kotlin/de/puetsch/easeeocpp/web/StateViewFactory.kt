@@ -1,6 +1,8 @@
 package de.puetsch.easeeocpp.web
 
+import de.puetsch.easeeocpp.control.AllocationMode
 import de.puetsch.easeeocpp.control.ControlState
+import de.puetsch.easeeocpp.control.SINGLE_CHARGER_MODE
 import de.puetsch.easeeocpp.domain.model.ChargeSettings
 import de.puetsch.easeeocpp.domain.model.ChargerSnapshot
 import de.puetsch.easeeocpp.domain.model.ChargerStatus
@@ -22,6 +24,11 @@ private const val TEXT_HA_VERBUNDEN = "verbunden"
 private const val TEXT_HA_GETRENNT = "getrennt"
 private const val TEXT_AUTO_VOR_BATTERIE = "Auto vor Batterie"
 private const val TEXT_BATTERIE_VOR_AUTO = "Batterie vor Auto"
+private const val TEXT_JA_WORT = "ja"
+private const val TEXT_NEIN_WORT = "nein"
+private const val TEXT_VERTEILUNG_PRIORISIERT = "Priorisiert"
+private const val TEXT_VERTEILUNG_GETEILT = "Geteilt"
+private const val TEXT_VERTEILUNG_EIN_AUTO = "Ein Auto"
 
 @Component
 class StateViewFactory(private val clock: Clock) {
@@ -55,6 +62,7 @@ class StateViewFactory(private val clock: Clock) {
             verbindung = if (charger.connected) TEXT_VERBUNDEN else TEXT_GETRENNT,
             verbindungKlasse = if (charger.connected) CSS_OK else CSS_WARNUNG,
             status = chargerStatusLabel(charger.status),
+            autoAngesteckt = if (charger.status.hasVehiclePluggedIn()) TEXT_JA_WORT else TEXT_NEIN_WORT,
             leistung = formatWatt(charger.power),
             letzterMesswert = formatClockWithAge(charger.lastMeterValueAt, now),
         )
@@ -87,10 +95,18 @@ class StateViewFactory(private val clock: Clock) {
             rohleistung = formatWatt(surplus?.rawTargetPower),
             zielleistung = formatWatt(surplus?.targetPower),
             zielstrom = formatAmpere(surplus?.targetCurrent),
+            verteilungsmodus = verteilungsmodusText(decision?.allocationMode),
             verteilung = decision?.allocation?.limits.orEmpty().map { VerteilungView(it.chargerId, formatAmpere(it.current)) },
             phaseHoechsteSpannung = formatPhaseLabel(decision?.phaseWithHighestVoltage),
             begruendung = formatOrFallback(decision?.reason ?: skippedReason),
         )
+    }
+
+    private fun verteilungsmodusText(allocationMode: String?): String = when (allocationMode) {
+        AllocationMode.PRIORITIZED.name -> TEXT_VERTEILUNG_PRIORISIERT
+        AllocationMode.SHARED.name -> TEXT_VERTEILUNG_GETEILT
+        SINGLE_CHARGER_MODE -> TEXT_VERTEILUNG_EIN_AUTO
+        else -> FALLBACK_TEXT
     }
 
     private fun lastActionView(action: ControlAction?, now: Instant): LastActionView =

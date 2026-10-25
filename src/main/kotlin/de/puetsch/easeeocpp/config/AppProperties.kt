@@ -42,7 +42,7 @@ data class HaEntities(
 
 data class ControlProperties(
     val interval: Duration = Duration.ofSeconds(5),
-    val settleDelay: Duration = Duration.ofSeconds(30),
+    val settleDelay: Duration = Duration.ofSeconds(15),
     val gridVoltage: Int = 240,
     val minHousePower: Int = 100,
     val minChargeCurrent: Int = 6,
@@ -55,6 +55,8 @@ data class ControlProperties(
     val ineligibleAfter: Duration = Duration.ofSeconds(120),
     val pauseDelay: Duration = Duration.ofSeconds(60),
     val allowRebalanceForMinCurrent: Boolean = false,
+    val priorityIdleAfter: Duration = Duration.ofMinutes(2),
+    val idlePowerThreshold: Double = 100.0,
     val historySize: Int = 50,
     val historyFile: String = "data/control-history.jsonl",
 )
