@@ -4,6 +4,9 @@ spring:
   application:
     name: easee-ha-ocpp
 management:
+  endpoint:
+    health:
+      show-details: never
   endpoints:
     web:
       exposure:
