@@ -40,12 +40,12 @@ function Invoke-EaseeRequest([string] $Method, [string] $Path, [string] $Token, 
     $parameters = @{
         Method      = $Method
         Uri         = (Get-EaseeUrl $Path)
-        ContentType = $JSON_CONTENT_TYPE
     }
     if (-not [string]::IsNullOrEmpty($Token)) {
         $parameters.Headers = @{ Authorization = "Bearer $Token" }
     }
     if ($null -ne $Body) {
+        $parameters.ContentType = $JSON_CONTENT_TYPE
         $parameters.Body = ($Body | ConvertTo-Json -Depth 10)
     }
     return Invoke-RestMethod @parameters
