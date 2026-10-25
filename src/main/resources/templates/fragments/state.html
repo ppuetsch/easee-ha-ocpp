@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="de" xmlns:th="http://www.thymeleaf.org">
+<body>
+<div th:fragment="inhalt" class="inhalt-fragment">
+
+    <div th:if="${!view.schattenmodus}" class="hinweis" data-testid="schattenmodus-aus">
+        Laden aktiv: Ladebefehle werden an die Charger gesendet.
+    </div>
+    <div th:if="${view.schattenmodus}" class="banner schatten" data-testid="schattenmodus-banner" role="alert">
+        <strong>Schattenmodus aktiv</strong> – es werden keine Ladebefehle gesendet. Die Berechnung läuft nur zur Anzeige.
+    </div>
+
+    <p class="stand" data-testid="auswertung-zeit">Auswertung: <span th:text="${view.auswertungZeit}">–</span></p>
+
+    <section class="karte" data-testid="section-verbindungen">
+        <h2>Verbindungen</h2>
+        <dl class="raster">
+            <dt>Home Assistant</dt>
+            <dd data-testid="ha-status"><span class="pille" th:classappend="${view.verbindungen.haStatusKlasse}" th:text="${view.verbindungen.haStatus}">–</span></dd>
+            <dt>Letzter Heartbeat</dt>
+            <dd data-testid="ha-heartbeat" th:text="${view.verbindungen.heartbeat}">–</dd>
+        </dl>
+        <table class="tabelle">
+            <thead>
+            <tr><th>Charger</th><th>Verbindung</th><th>Status</th><th>Leistung</th><th>Letzter Messwert</th></tr>
+            </thead>
+            <tbody>
+            <tr th:each="charger : ${view.verbindungen.chargers}" th:attr="data-testid='charger-' + ${charger.id}">
+                <td th:text="${charger.id}">–</td>
+                <td><span class="pille" th:classappend="${charger.verbindungKlasse}" th:text="${charger.verbindung}">–</span></td>
+                <td data-testid="charger-status" th:text="${charger.status}">–</td>
+                <td th:text="${charger.leistung}">–</td>
+                <td th:text="${charger.letzterMesswert}">–</td>
+            </tr>
+            </tbody>
+        </table>
+    </section>
+
+    <section class="karte" data-testid="section-eingaenge">
+        <h2>Relevante Eingänge</h2>
+        <dl class="raster">
+            <th:block th:replace="~{:: kennzahl('eingang-pv', 'PV-Leistung', ${view.eingaenge.pvLeistung})}"></th:block>
+            <th:block th:replace="~{:: kennzahl('eingang-netz', 'Netz', ${view.eingaenge.netzLeistung})}"></th:block>
+            <th:block th:replace="~{:: kennzahl('eingang-batterie', 'Batterie', ${view.eingaenge.batterieLeistung})}"></th:block>
+            <th:block th:replace="~{:: kennzahl('eingang-ev', 'EV-Leistung', ${view.eingaenge.evLeistung})}"></th:block>
+            <th:block th:replace="~{:: kennzahl('eingang-puffer', 'Sicherheitspuffer', ${view.eingaenge.puffer})}"></th:block>
+            <th:block th:replace="~{:: kennzahl('eingang-mindeststrom', 'Mindeststrom', ${view.eingaenge.mindeststrom})}"></th:block>
+            <th:block th:replace="~{:: kennzahl('eingang-zielphasen', 'Zielphasen', ${view.eingaenge.zielphasen})}"></th:block>
+            <th:block th:replace="~{:: kennzahl('eingang-ist-phasen', 'Ist-Phasen', ${view.eingaenge.istPhasen})}"></th:block>
+            <th:block th:replace="~{:: kennzahl('eingang-ueberschuss', 'Überschussladen', ${view.eingaenge.ueberschuss})}"></th:block>
+            <th:block th:replace="~{:: kennzahl('eingang-batterie-praeferenz', 'Vorrang', ${view.eingaenge.batteriePraeferenz})}"></th:block>
+            <th:block th:replace="~{:: kennzahl('eingang-prio-charger', 'Prio-Charger', ${view.eingaenge.prioCharger})}"></th:block>
+        </dl>
+    </section>
+
+    <section class="karte" data-testid="section-ergebnis">
+        <h2>Berechnungsergebnis</h2>
+        <dl class="raster">
+            <th:block th:replace="~{:: kennzahl('ergebnis-mindest-pv', 'Mindest-PV-Leistung', ${view.ergebnis.mindestPvLeistung})}"></th:block>
+            <th:block th:replace="~{:: kennzahl('ergebnis-rohleistung', 'Rohleistung', ${view.ergebnis.rohleistung})}"></th:block>
+            <th:block th:replace="~{:: kennzahl('ergebnis-zielleistung', 'Zielleistung', ${view.ergebnis.zielleistung})}"></th:block>
+            <th:block th:replace="~{:: kennzahl('ergebnis-zielstrom', 'Zielstrom', ${view.ergebnis.zielstrom})}"></th:block>
+            <th:block th:replace="~{:: kennzahl('ergebnis-phase', 'Phase mit höchster Spannung', ${view.ergebnis.phaseHoechsteSpannung})}"></th:block>
+            <dt>Verteilung je Charger</dt>
+            <dd data-testid="ergebnis-verteilung">
+                <ul class="liste">
+                    <li th:each="eintrag : ${view.ergebnis.verteilung}" th:attr="data-charger=${eintrag.chargerId}">
+                        <span th:text="${eintrag.chargerId}">–</span>: <span th:text="${eintrag.strom}">–</span>
+                    </li>
+                </ul>
+            </dd>
+            <dt>Begründung</dt>
+            <dd data-testid="ergebnis-begruendung" th:text="${view.ergebnis.begruendung}">–</dd>
+            <dt>Übersprungen</dt>
+            <dd data-testid="ergebnis-uebersprungen" th:text="${view.uebersprungenGrund}">–</dd>
+        </dl>
+    </section>
+
+    <section class="karte" data-testid="section-letzter-eingriff">
+        <h2>Letzter Control-Input</h2>
+        <dl class="raster">
+            <dt>Zeitpunkt</dt>
+            <dd data-testid="letzter-zeit" th:text="${view.letzterEingriff.zeit}">–</dd>
+            <dt>Charger</dt>
+            <dd data-testid="letzter-charger" th:text="${view.letzterEingriff.charger}">–</dd>
+            <dt>Aktion</dt>
+            <dd data-testid="letzter-aktion" th:text="${view.letzterEingriff.aktion}">–</dd>
+            <dt>Phasen</dt>
+            <dd data-testid="letzter-phasen" th:text="${view.letzterEingriff.phasen}">–</dd>
+            <dt>Strom</dt>
+            <dd data-testid="letzter-strom" th:text="${view.letzterEingriff.strom}">–</dd>
+            <dt>Ergebnis</dt>
+            <dd data-testid="letzter-ergebnis" th:text="${view.letzterEingriff.ergebnis}">–</dd>
+            <dt>Settle-Delay</dt>
+            <dd data-testid="settle-restzeit" th:text="${view.settleRestzeit}">–</dd>
+        </dl>
+
+        <h3>Letzte Eingriffe</h3>
+        <table class="tabelle" data-testid="historie">
+            <thead>
+            <tr><th>Zeit</th><th>Charger</th><th>Aktion</th><th>Phasen</th><th>Strom</th><th>Ergebnis</th></tr>
+            </thead>
+            <tbody>
+            <tr th:if="${#lists.isEmpty(view.historie)}" data-testid="historie-leer">
+                <td colspan="6">Noch keine Eingriffe</td>
+            </tr>
+            <tr th:each="zeile : ${view.historie}" class="historie-zeile">
+                <td th:text="${zeile.zeit}">–</td>
+                <td th:text="${zeile.charger}">–</td>
+                <td th:text="${zeile.aktion}">–</td>
+                <td th:text="${zeile.phasen}">–</td>
+                <td th:text="${zeile.strom}">–</td>
+                <td th:text="${zeile.ergebnis}">–</td>
+            </tr>
+            </tbody>
+        </table>
+    </section>
+</div>
+
+<th:block th:fragment="kennzahl (testId, label, wert)">
+    <dt th:text="${label}">–</dt>
+    <dd th:attr="data-testid=${testId}"><span class="wert" th:text="${wert}">–</span></dd>
+</th:block>
+</body>
+</html>
