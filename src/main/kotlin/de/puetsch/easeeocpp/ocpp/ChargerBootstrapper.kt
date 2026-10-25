@@ -16,15 +16,14 @@ import java.util.concurrent.Executors
 
 private const val METER_VALUES_SAMPLED_DATA_VALUE =
     "Power.Active.Import,Current.Import,Voltage,Current.Offered,Energy.Active.Import.Register"
-private const val FREE_CHARGING_ENABLED = "true"
 
 // Easee lehnt kurze Messintervalle ab; die Folge probiert vom gewünschten Wert aufwärts, bis der Charger zustimmt.
 private val SAMPLE_INTERVAL_FALLBACK_SECONDS = listOf(10L, 15L, 30L, 60L)
 
 /**
  * Konfiguriert den Charger nach einer neuen Verbindung: Messwerte, Telemetrie-Trigger, dann das Regelprofil.
- * Kostenloses Laden (ohne Autorisierung) setzt der Bootstrapper nur, wenn die Steuerung wirklich schaltet;
- * im Schattenmodus bleibt der Charger unverändert.
+ * Kostenloses Laden (`FreeCharging`) wird bewusst nie gesetzt: Easee kennt die Keys nicht, und die Ladefreigabe
+ * läuft über die RFID-Whitelist.
  */
 @Component
 class ChargerBootstrapper(
@@ -61,10 +60,7 @@ class ChargerBootstrapper(
         executor.shutdownNow()
     }
 
-    private fun configurationChanges(): List<ChangeConfigurationRequest> =
-        telemetryConfigurationChanges() + freeChargingConfigurationChanges()
-
-    private fun telemetryConfigurationChanges(): List<ChangeConfigurationRequest> = listOf(
+    private fun configurationChanges(): List<ChangeConfigurationRequest> = listOf(
         ChangeConfigurationRequest(
             OcppConfigurationKeys.METER_VALUES_SAMPLED_DATA,
             METER_VALUES_SAMPLED_DATA_VALUE,
@@ -85,17 +81,6 @@ class ChargerBootstrapper(
     private fun logCurrentConfiguration(chargerId: ChargerId, session: OcppChargerSession) {
         val response = session.call(OcppActions.GET_CONFIGURATION, GetConfigurationRequest()).join()
         logger.info("Konfiguration von {}: {}", chargerId, (response as? OcppResponse.Result)?.payload?.toString() ?: response.describe())
-    }
-
-    private fun freeChargingConfigurationChanges(): List<ChangeConfigurationRequest> {
-        if (!settings.control.actuationEnabled) {
-            logger.info("Schattenmodus: FreeCharging wird nicht gesetzt")
-            return emptyList()
-        }
-        return listOf(
-            ChangeConfigurationRequest(OcppConfigurationKeys.FREE_CHARGING, FREE_CHARGING_ENABLED),
-            ChangeConfigurationRequest(OcppConfigurationKeys.FREE_CHARGING_ID_TAG, settings.ocpp.freeChargingIdTag),
-        )
     }
 
     private fun applyConfigurationChange(chargerId: ChargerId, session: OcppChargerSession, change: ChangeConfigurationRequest) {

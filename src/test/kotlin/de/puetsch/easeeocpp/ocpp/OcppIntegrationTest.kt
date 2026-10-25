@@ -28,8 +28,10 @@ private const val OTHER_CHARGER_ID = "EH2NSSVK"
 private const val PASSWORD = "geheim"
 private const val WAIT_LIMIT_SECONDS = 5L
 private const val POLL_INTERVAL_MILLIS = 20L
+private const val KNOWN_ID_TAG = "TEST-TAG-INTEGRATION"
+private const val UNKNOWN_ID_TAG = "TEST-TAG-UNBEKANNT"
 private const val CLOSED_BY_REPLACEMENT = 1008
-private const val CONFIGURATION_CHANGES_WITH_ACTUATION = 4
+private const val CONFIGURATION_CHANGES = 2
 private const val TELEMETRY_TRIGGERS = 2
 private const val FIRST_LIMIT_AMPERE = 16
 private const val SECOND_LIMIT_AMPERE = 10
@@ -42,6 +44,7 @@ private const val SECOND_LIMIT_AMPERE = 10
     properties = [
         "easee.ocpp.basic-auth-password=$PASSWORD",
         "easee.control.actuation-enabled=true",
+        "easee.ocpp.allowed-id-tags=$KNOWN_ID_TAG",
     ],
 )
 class OcppIntegrationTest {
@@ -67,13 +70,11 @@ class OcppIntegrationTest {
         val charger = connectedCharger(CHARGER_ID, PASSWORD)
 
         assertEquals("Accepted", charger.boot().payloadStatus())
-        awaitCondition { charger.callsFor(OcppActions.CHANGE_CONFIGURATION).size == CONFIGURATION_CHANGES_WITH_ACTUATION }
+        awaitCondition { charger.callsFor(OcppActions.CHANGE_CONFIGURATION).size == CONFIGURATION_CHANGES }
         val changedKeys = charger.callsFor(OcppActions.CHANGE_CONFIGURATION).map { it.payload.path("key").asText() }
         assertEquals(
             listOf(
                 OcppConfigurationKeys.METER_VALUES_SAMPLED_DATA,
-                OcppConfigurationKeys.FREE_CHARGING,
-                OcppConfigurationKeys.FREE_CHARGING_ID_TAG,
                 OcppConfigurationKeys.METER_VALUE_SAMPLE_INTERVAL,
             ),
             changedKeys,
@@ -118,6 +119,40 @@ class OcppIntegrationTest {
         assertTrue(fleet.applyLimit(CHARGER_ID, SECOND_LIMIT_AMPERE).success)
         awaitCondition { limitCalls(new, SECOND_LIMIT_AMPERE).isNotEmpty() }
         assertTrue(limitCalls(old, SECOND_LIMIT_AMPERE).isEmpty())
+    }
+
+    @Test
+    @Story("RFID-Freigabe")
+    fun knownIdTagIsAcceptedInAuthorizeAndStartTransaction() {
+        val charger = connectedCharger(CHARGER_ID, PASSWORD)
+
+        val authorize = charger.call(OcppActions.AUTHORIZE, mapOf("idTag" to KNOWN_ID_TAG))
+        val start = charger.call(OcppActions.START_TRANSACTION, startTransactionPayload(KNOWN_ID_TAG))
+
+        assertEquals("Accepted", authorize.idTagInfoStatus())
+        assertEquals("Accepted", start.idTagInfoStatus())
+    }
+
+    @Test
+    @Story("RFID-Freigabe")
+    fun unknownIdTagIsInvalidInAuthorizeAndStartTransaction() {
+        val charger = connectedCharger(CHARGER_ID, PASSWORD)
+
+        val authorize = charger.call(OcppActions.AUTHORIZE, mapOf("idTag" to UNKNOWN_ID_TAG))
+        val start = charger.call(OcppActions.START_TRANSACTION, startTransactionPayload(UNKNOWN_ID_TAG))
+
+        assertEquals("Invalid", authorize.idTagInfoStatus())
+        assertEquals("Invalid", start.idTagInfoStatus())
+    }
+
+    @Test
+    @Story("RFID-Freigabe")
+    fun knownIdTagIsMatchedCaseInsensitively() {
+        val charger = connectedCharger(CHARGER_ID, PASSWORD)
+
+        val authorize = charger.call(OcppActions.AUTHORIZE, mapOf("idTag" to KNOWN_ID_TAG.lowercase()))
+
+        assertEquals("Accepted", authorize.idTagInfoStatus())
     }
 
     @Test
@@ -201,6 +236,16 @@ class OcppIntegrationTest {
     private fun OcppFrame.payloadStatus(): String =
         (this as OcppFrame.CallResult).payload.path("status").asText()
 
+    private fun OcppFrame.idTagInfoStatus(): String =
+        (this as OcppFrame.CallResult).payload.path("idTagInfo").path("status").asText()
+
+    private fun startTransactionPayload(idTag: String): Map<String, Any> = mapOf(
+        "connectorId" to 1,
+        "idTag" to idTag,
+        "meterStart" to 0,
+        "timestamp" to "2026-10-25T12:00:00Z",
+    )
+
     @SpringBootConfiguration
     @EnableAutoConfiguration
     @EnableConfigurationProperties(AppProperties::class)
@@ -215,6 +260,7 @@ class OcppIntegrationTest {
         ChargingProfileService::class,
         ChargerBootstrapper::class,
         OcppChargerFleet::class,
+        IdTagWhitelist::class,
     )
     class OcppTestContext
 }

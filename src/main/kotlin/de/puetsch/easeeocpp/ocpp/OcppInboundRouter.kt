@@ -34,6 +34,7 @@ class OcppInboundRouter(
     private val tracker: ChargerStateTracker,
     private val clock: Clock,
     private val settings: AppProperties,
+    private val idTagWhitelist: IdTagWhitelist,
 ) {
     private val logger = LoggerFactory.getLogger(javaClass)
     private val nextTransactionId = AtomicInteger(transactionIdSeed())
@@ -42,8 +43,8 @@ class OcppInboundRouter(
         OcppActions.HEARTBEAT to { _, _ -> toNode(HeartbeatResponse(currentTimestamp())) },
         OcppActions.STATUS_NOTIFICATION to ::handleStatusNotification,
         OcppActions.METER_VALUES to ::handleMeterValues,
-        OcppActions.AUTHORIZE to { _, payload -> handleAuthorize(payload) },
-        OcppActions.START_TRANSACTION to { _, payload -> handleStartTransaction(payload) },
+        OcppActions.AUTHORIZE to ::handleAuthorize,
+        OcppActions.START_TRANSACTION to ::handleStartTransaction,
         OcppActions.STOP_TRANSACTION to { _, payload -> handleStopTransaction(payload) },
     )
 
@@ -107,19 +108,28 @@ class OcppInboundRouter(
         return emptyPayload()
     }
 
-    private fun handleAuthorize(payload: JsonNode): JsonNode {
-        decode<AuthorizeRequest>(payload)
-        return toNode(AuthorizeResponse(acceptedIdTagInfo()))
+    private fun handleAuthorize(chargePointId: ChargerId, payload: JsonNode): JsonNode {
+        val request = decode<AuthorizeRequest>(payload)
+        return toNode(AuthorizeResponse(idTagInfoFor(chargePointId, request.idTag)))
     }
 
-    private fun handleStartTransaction(payload: JsonNode): JsonNode {
-        decode<StartTransactionRequest>(payload)
+    private fun handleStartTransaction(chargePointId: ChargerId, payload: JsonNode): JsonNode {
+        val request = decode<StartTransactionRequest>(payload)
         return toNode(
             StartTransactionResponse(
                 transactionId = nextTransactionId.getAndIncrement(),
-                idTagInfo = acceptedIdTagInfo(),
+                idTagInfo = idTagInfoFor(chargePointId, request.idTag),
             ),
         )
+    }
+
+    private fun idTagInfoFor(chargePointId: ChargerId, idTag: String): IdTagInfo {
+        if (idTagWhitelist.isAllowed(idTag)) {
+            logger.info("RFID {} an {} akzeptiert", idTag, chargePointId)
+            return IdTagInfo(status = OCPP_STATUS_ACCEPTED)
+        }
+        logger.warn("RFID {} an {} abgelehnt, nicht in EASEE_OCPP_ALLOWEDIDTAGS", idTag, chargePointId)
+        return IdTagInfo(status = OCPP_STATUS_INVALID)
     }
 
     private fun handleStopTransaction(payload: JsonNode): JsonNode {

@@ -3,6 +3,7 @@ package de.puetsch.easeeocpp.ocpp
 import tools.jackson.databind.JsonNode
 
 const val OCPP_STATUS_ACCEPTED = "Accepted"
+const val OCPP_STATUS_INVALID = "Invalid"
 
 sealed interface OcppResponse {
     data class Result(val payload: JsonNode) : OcppResponse

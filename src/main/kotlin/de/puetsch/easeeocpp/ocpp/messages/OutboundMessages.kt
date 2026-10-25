@@ -5,8 +5,6 @@ import com.fasterxml.jackson.annotation.JsonInclude
 object OcppConfigurationKeys {
     const val METER_VALUES_SAMPLED_DATA = "MeterValuesSampledData"
     const val METER_VALUE_SAMPLE_INTERVAL = "MeterValueSampleInterval"
-    const val FREE_CHARGING = "FreeCharging"
-    const val FREE_CHARGING_ID_TAG = "FreeChargingIdTag"
 }
 
 object OcppRequestedMessages {

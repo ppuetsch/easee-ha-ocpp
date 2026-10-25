@@ -1,6 +1,7 @@
 package de.puetsch.easeeocpp.ocpp
 
 import de.puetsch.easeeocpp.config.AppProperties
+import de.puetsch.easeeocpp.config.OcppProperties
 import de.puetsch.easeeocpp.domain.model.ChargerStatus
 import io.mockk.mockk
 import io.mockk.verify
@@ -14,6 +15,8 @@ import org.junit.jupiter.api.Test
 import tools.jackson.databind.JsonNode
 
 private const val CHARGER_ID = "EHDFQLBX"
+private const val KNOWN_ID_TAG = "TEST-TAG-A"
+private const val UNKNOWN_ID_TAG = "TEST-TAG-B"
 
 @Epic("OCPP")
 @Feature("Eingehende Nachrichten")
@@ -24,7 +27,8 @@ class OcppInboundRouterTest {
 
     @BeforeEach
     fun createRouter() {
-        router = OcppInboundRouter(tracker, clock, AppProperties())
+        val settings = AppProperties(ocpp = OcppProperties(allowedIdTags = listOf(KNOWN_ID_TAG)))
+        router = OcppInboundRouter(tracker, clock, settings, IdTagWhitelist(settings))
     }
 
     @Test
@@ -79,16 +83,24 @@ class OcppInboundRouterTest {
 
     @Test
     @Story("Authorize")
-    fun authorizeIsAlwaysAccepted() {
-        val result = routeResult("Authorize", """{"idTag":"IRGENDEINER"}""")
+    fun authorizeAcceptsWhitelistedIdTag() {
+        val result = routeResult("Authorize", """{"idTag":"$KNOWN_ID_TAG"}""")
 
         assertEquals("Accepted", result.path("idTagInfo").path("status").asText())
     }
 
     @Test
+    @Story("Authorize")
+    fun authorizeRejectsUnknownIdTagAsInvalid() {
+        val result = routeResult("Authorize", """{"idTag":"$UNKNOWN_ID_TAG"}""")
+
+        assertEquals("Invalid", result.path("idTagInfo").path("status").asText())
+    }
+
+    @Test
     @Story("StartTransaction")
     fun startTransactionGetsIncreasingTransactionIds() {
-        val payload = """{"connectorId":1,"idTag":"FREECHARGING","meterStart":0,"timestamp":"2026-10-25T12:00:00Z"}"""
+        val payload = startTransactionPayload(KNOWN_ID_TAG)
 
         val first = routeResult("StartTransaction", payload)
         val second = routeResult("StartTransaction", payload)
@@ -98,6 +110,17 @@ class OcppInboundRouterTest {
         assertEquals(seedFromClock + 1, second.path("transactionId").asInt())
         assertEquals("Accepted", first.path("idTagInfo").path("status").asText())
     }
+
+    @Test
+    @Story("StartTransaction")
+    fun startTransactionWithUnknownIdTagIsInvalid() {
+        val result = routeResult("StartTransaction", startTransactionPayload(UNKNOWN_ID_TAG))
+
+        assertEquals("Invalid", result.path("idTagInfo").path("status").asText())
+    }
+
+    private fun startTransactionPayload(idTag: String): String =
+        """{"connectorId":1,"idTag":"$idTag","meterStart":0,"timestamp":"2026-10-25T12:00:00Z"}"""
 
     @Test
     @Story("StatusNotification")

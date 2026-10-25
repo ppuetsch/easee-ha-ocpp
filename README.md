@@ -11,8 +11,25 @@ Details und Entscheidungen: [docs/PLAN.md](docs/PLAN.md).
 - Health: DOWN nur, wenn der Regelzyklus seit über 60 s nicht gelaufen ist (oder nach einer Anlaufzeit von 60 s noch keiner lief). Eine fehlende HA-Verbindung ist kein DOWN, sondern steht als Detail `haConnected`. Der Docker-HEALTHCHECK prüft `/actuator/health`.
 - OCPP: `ws://<host>:8443/ocpp/<Seriennummer>`, Basic-Auth (Benutzer = Seriennummer). Deployt mit `deploy.ps1 -PlainOcpp`.
 - **Schattenmodus ist Standard** (`ACTUATION_ENABLED=false`): der Service rechnet und zeigt an, sendet aber nichts an Charger und Easee-Cloud. Erst mit `deploy/deploy.ps1 -Actuate` regelt er.
-- Secrets nur als Env-Vars: `HA_TOKEN`, `EASEE_USERNAME`, `EASEE_PASSWORD`, `OCPP_BASIC_AUTH_PASSWORD`, `KEYSTORE_PASSWORD`.
-- Fail-safe: Das Regelprofil läuft nach 5 min ab, danach gilt ein 0-A-Basisprofil. Fällt der Service aus, hört die Ladung also auf.
+- Fail-safe: Das Regelprofil läuft nach 2 min ab, danach gilt ein 0-A-Basisprofil. Fällt der Service aus, hört die Ladung also auf. Details unten unter „Dienstausfall“.
+- Secrets und Freigabe per Env-Var: `HA_TOKEN`, `EASEE_USERNAME`, `EASEE_PASSWORD`, `OCPP_BASIC_AUTH_PASSWORD`, `KEYSTORE_PASSWORD`, `EASEE_OCPP_ALLOWEDIDTAGS` (RFID-Whitelist, siehe unten).
+
+## RFID-Freigabe
+- Geladen wird nur mit einer Karte, deren ID auf der Whitelist steht. `Authorize` und `StartTransaction` antworten für andere Karten mit `Invalid`. `StopTransaction` wird immer akzeptiert.
+- Die Whitelist kommt aus `EASEE_OCPP_ALLOWEDIDTAGS` (kommagetrennt). Der Vergleich ignoriert Groß-/Kleinschreibung und Leerzeichen am Rand. Ist die Liste leer, werden alle Karten abgelehnt; der Service warnt beim Start.
+- Die Liste liegt als User-Umgebungsvariable gleichen Namens auf dem Windows-PC. `deploy.ps1` bricht ab, wenn sie fehlt.
+- Jede Entscheidung steht im Log: akzeptiert als INFO, abgelehnt als WARN mit ID und Charger.
+- Neue Karte hinzufügen:
+  1. Unbekannte Karte an den Charger halten.
+  2. ID aus dem Log lesen: `docker logs easee-ha-ocpp | grep abgelehnt`
+  3. Die ID in `EASEE_OCPP_ALLOWEDIDTAGS` ergänzen (kommagetrennt, bestehende Einträge behalten).
+  4. Neu deployen: `deploy/deploy.ps1 -Local -PlainOcpp -Actuate` (Parameter wie beim laufenden Betrieb).
+- `FreeCharging` wird nicht genutzt: Der Service setzt es nie am Charger, da Easee die Keys nicht kennt und die Freigabe über die Whitelist läuft.
+
+## Dienstausfall
+- Das Regelprofil gilt 2 min (`easee.ocpp.profile-duration`, Standard 120 s). Der Service erneuert es alle 60 s (`easee.control.profile-refresh-interval`). Danach gilt das Basisprofil mit 0 A, und die Ladung stoppt.
+- Der Start prüft, dass die Erneuerung kürzer ist als die Profildauer. Andernfalls bricht der Service mit einer Fehlermeldung ab.
+- **Einschränkung:** Dieses Verhalten gilt nur, solange der Charger die Profile behält. Nach einem Neustart des Chargers ist ungeprüft, ob er das Regelprofil noch hat oder wie er ohne Service reagiert.
 - Wie im Altskript wird nie unter `minimum_ev_current` geregelt; die Pausen-Hysterese greift daher nur bei Mindeststrom 0.
 
 ## Container und Pfade
@@ -31,7 +48,7 @@ Details und Entscheidungen: [docs/PLAN.md](docs/PLAN.md).
 3. Schattenmodus parallel zu `pv-surcharge`: `deploy/deploy.ps1 -DryRun`, dann `deploy/deploy.ps1`. Einige Zyklen lang vergleichen (GUI gegen `pv-surcharge`), `/actuator/health` muss UP sein.
 4. Umschaltfenster: `deploy/deploy.ps1 -StopLegacy` stoppt `pv-surcharge` (Bestätigung nötig, siehe oben). Danach in der Easee-App Lastverteilung/Zeitpläne des Circuits abschalten und `deploy/activate-easee-ocpp.ps1 -Serial <Nr>` ausführen (setzt vorher den Circuit-`dynamicCurrent` zurück).
 5. Regelung scharf schalten: `deploy/deploy.ps1 -Actuate`. Erst jetzt sendet der Service Befehle an den Charger.
-6. Abnahme am echten Charger (Beta-Feature, Firmware ≥ 344): Verbindung, MeterValues, Wirkung von `SetChargingProfile` (ChargePointMaxProfile, 0 A), `FreeCharging`, Reconnect. Rückweg: `deploy/deactivate-easee-ocpp.ps1`.
+6. Abnahme am echten Charger (Beta-Feature, Firmware ≥ 344): Verbindung, MeterValues, Wirkung von `SetChargingProfile` (ChargePointMaxProfile, 0 A), RFID-Freigabe mit bekannter und unbekannter Karte, Reconnect. Rückweg: `deploy/deactivate-easee-ocpp.ps1`.
 
 ## Entwicklung
 `./gradlew test` (Unit, Spring-Integration, Playwright; Allure-Ergebnisse in `build/allure-results`), `./gradlew installPlaywrightBrowsers`.
@@ -40,7 +57,7 @@ CI (`.github/workflows/ci.yml`) lädt JUnit-XML, Allure-Report, JaCoCo und Playw
 ## Stand der Inbetriebnahme (2026-10-25) und Abweichungen vom Plan
 - **`ws://` statt `wss://`:** Die Easee-API lehnt eine private CA ab (`Invalid CaCertificate: self-signed certificate`). Für `wss` bräuchte es ein öffentlich vertrauenswürdiges Zertifikat (z. B. Let's Encrypt für eine eigene Domain). Aktuell läuft OCPP daher unverschlüsselt mit Basic-Auth (Security-Profil 1) im Heimnetz; das Passwort (max. 20 Zeichen, Easee-Vorgabe) geht im Klartext über das LAN. Der TLS-Connector bleibt im Code (`easee.ocpp.ssl.enabled=true`, `deploy/generate-certs.ps1`) für den Fall eines öffentlichen Zertifikats.
 - **Messintervall:** Der Charger akzeptiert `MeterValueSampleInterval` frühestens bei 30 s. Die Ladeleistung ist daher bis zu ~30 s alt (`meterValueMaxAge` 90 s).
-- **`FreeCharging`/`FreeChargingIdTag`** kennt Easee nicht (`ProtocolError`). Der Server akzeptiert `Authorize`/`StartTransaction` immer; ob ein Auto ohne RFID startet, ist am echten Fahrzeug zu prüfen.
+- **`FreeCharging`/`FreeChargingIdTag`** kennt Easee nicht (`ProtocolError`) und wird deshalb nicht mehr gesendet. Freigabe läuft ausschließlich über die RFID-Whitelist (siehe „RFID-Freigabe“).
 - **Bekanntes Risiko:** Nach einem Neustart des Service blieb ein Charger ~14 min still (verbunden, aber ohne BootNotification), bis seine Konfiguration erneut angewendet wurde (`deploy/activate-easee-ocpp.ps1 -Serial <Nr> -SkipCircuitReset -Plain`). Danach Status in der GUI prüfen.
 - Der alte Container `pv-surcharge` ist gestoppt, nicht gelöscht (`--restart=no`).
 

@@ -5,6 +5,7 @@ import io.qameta.allure.Epic
 import io.qameta.allure.Feature
 import io.qameta.allure.Story
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
@@ -12,6 +13,7 @@ import tools.jackson.databind.JsonNode
 import java.time.Duration
 
 private const val SCHEDULE_START = "2026-10-25T11:59:50Z"
+private const val DEFAULT_PROFILE_DURATION_SECONDS = 120
 
 private const val BASE_PROFILE_GOLDEN = """
 {"connectorId":0,"csChargingProfiles":{"chargingProfileId":1,"stackLevel":0,
@@ -23,7 +25,7 @@ private const val BASE_PROFILE_GOLDEN = """
 private const val LIMIT_PROFILE_GOLDEN = """
 {"connectorId":0,"csChargingProfiles":{"chargingProfileId":2,"stackLevel":1,
  "chargingProfilePurpose":"ChargePointMaxProfile","chargingProfileKind":"Absolute",
- "chargingSchedule":{"duration":300,"startSchedule":"$SCHEDULE_START","chargingRateUnit":"A",
+ "chargingSchedule":{"duration":120,"startSchedule":"$SCHEDULE_START","chargingRateUnit":"A",
  "chargingSchedulePeriod":[{"startPeriod":0,"limit":16.0}]}}}
 """
 
@@ -48,6 +50,24 @@ class ChargingProfileFactoryTest {
     @Story("Regelprofil")
     fun limitProfileMatchesGoldenJsonWithoutNumberPhases() {
         assertEquals(golden(LIMIT_PROFILE_GOLDEN), OcppJson.mapper.valueToTree(factory.limitRequest(16)))
+    }
+
+    @Test
+    @Story("Fail-safe")
+    fun baseProfileHasNoDurationSoItStaysActive() {
+        val schedule = OcppJson.mapper.valueToTree<JsonNode>(factory.baseRequest())
+            .path("csChargingProfiles").path("chargingSchedule")
+
+        assertFalse(schedule.has("duration"))
+    }
+
+    @Test
+    @Story("Fail-safe")
+    fun limitProfileDurationIsConfiguredProfileDuration() {
+        val schedule = OcppJson.mapper.valueToTree<JsonNode>(factory.limitRequest(16))
+            .path("csChargingProfiles").path("chargingSchedule")
+
+        assertEquals(DEFAULT_PROFILE_DURATION_SECONDS, schedule.path("duration").asInt())
     }
 
     @Test

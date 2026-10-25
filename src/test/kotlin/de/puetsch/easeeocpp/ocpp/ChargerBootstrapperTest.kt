@@ -1,7 +1,6 @@
 package de.puetsch.easeeocpp.ocpp
 
 import de.puetsch.easeeocpp.config.AppProperties
-import de.puetsch.easeeocpp.config.ControlProperties
 import de.puetsch.easeeocpp.ocpp.messages.ChangeConfigurationRequest
 import de.puetsch.easeeocpp.ocpp.messages.OcppConfigurationKeys
 import de.puetsch.easeeocpp.ocpp.messages.OcppRequestedMessages
@@ -23,16 +22,16 @@ import java.util.concurrent.CompletableFuture
 private const val CHARGER_ID = "EHDFQLBX"
 private const val EXPECTED_SAMPLED_DATA =
     "Power.Active.Import,Current.Import,Voltage,Current.Offered,Energy.Active.Import.Register"
-private const val CONFIGURATION_CHANGES_WITH_ACTUATION = 4
-private const val CONFIGURATION_CHANGES_IN_SHADOW_MODE = 2
+private const val CONFIGURATION_CHANGES = 2
 private const val TELEMETRY_TRIGGERS = 2
 private const val CONFIGURATION_READS = 1
 private const val ALL_INTERVAL_CANDIDATES_REJECTED = 2
-private const val CHANGES_WITHOUT_INTERVAL_WITH_ACTUATION = 3
+private const val CHANGE_SAMPLED_DATA = 1
 private const val SET_PROFILES_FOR_BASE_AND_LIMIT = 2
 private const val SET_PROFILES_FOR_LIMIT_ONLY = 1
-private const val BOOTSTRAP_CALLS_WITH_ACTUATION =
-    CONFIGURATION_CHANGES_WITH_ACTUATION + CONFIGURATION_READS + TELEMETRY_TRIGGERS
+private const val BOOTSTRAP_CALLS = CONFIGURATION_CHANGES + CONFIGURATION_READS + TELEMETRY_TRIGGERS
+private const val FREE_CHARGING_KEY = "FreeCharging"
+private const val FREE_CHARGING_ID_TAG_KEY = "FreeChargingIdTag"
 private val AWAIT_TIMEOUT: Duration = Duration.ofSeconds(5)
 
 @Epic("OCPP")
@@ -51,7 +50,7 @@ class ChargerBootstrapperTest {
         every { session.chargePointId } returns CHARGER_ID
         registry.register(session)
         acceptEverything(session)
-        createBootstrapper(actuationEnabled = true)
+        createBootstrapper()
     }
 
     @Test
@@ -60,7 +59,7 @@ class ChargerBootstrapperTest {
         bootstrapper.bootstrap(CHARGER_ID)
 
         assertEquals(
-            List(CONFIGURATION_CHANGES_WITH_ACTUATION) { OcppActions.CHANGE_CONFIGURATION } +
+            List(CONFIGURATION_CHANGES) { OcppActions.CHANGE_CONFIGURATION } +
                 List(CONFIGURATION_READS) { OcppActions.GET_CONFIGURATION } +
                 List(TELEMETRY_TRIGGERS) { OcppActions.TRIGGER_MESSAGE },
             actions,
@@ -69,42 +68,22 @@ class ChargerBootstrapperTest {
 
     @Test
     @Story("Konfigurationsfolge")
-    fun freeChargingAndSampleSettingsAreSentWithExpectedValues() {
+    fun sampleSettingsAreSentWithExpectedValues() {
         bootstrapper.bootstrap(CHARGER_ID)
 
         val changes = configurationChanges().associateBy { it.key }
         assertEquals(EXPECTED_SAMPLED_DATA, changes[OcppConfigurationKeys.METER_VALUES_SAMPLED_DATA]?.value)
         assertEquals("30", changes[OcppConfigurationKeys.METER_VALUE_SAMPLE_INTERVAL]?.value)
-        assertEquals("true", changes[OcppConfigurationKeys.FREE_CHARGING]?.value)
-        assertEquals("FREECHARGING", changes[OcppConfigurationKeys.FREE_CHARGING_ID_TAG]?.value)
     }
 
     @Test
-    @Story("Schattenmodus")
-    fun shadowModeSendsNoFreeChargingChange() {
-        createBootstrapper(actuationEnabled = false)
-
+    @Story("FreeCharging entfernt")
+    fun freeChargingKeysAreNeverSent() {
         bootstrapper.bootstrap(CHARGER_ID)
 
-        assertEquals(
-            listOf(OcppConfigurationKeys.METER_VALUES_SAMPLED_DATA, OcppConfigurationKeys.METER_VALUE_SAMPLE_INTERVAL),
-            configurationChanges().map { it.key },
-        )
-    }
-
-    @Test
-    @Story("Schattenmodus")
-    fun shadowModeStillRequestsTelemetry() {
-        createBootstrapper(actuationEnabled = false)
-
-        bootstrapper.bootstrap(CHARGER_ID)
-
-        assertEquals(
-            List(CONFIGURATION_CHANGES_IN_SHADOW_MODE) { OcppActions.CHANGE_CONFIGURATION } +
-                List(CONFIGURATION_READS) { OcppActions.GET_CONFIGURATION } +
-                List(TELEMETRY_TRIGGERS) { OcppActions.TRIGGER_MESSAGE },
-            actions,
-        )
+        val sentKeys = configurationChanges().map { it.key }
+        assertFalse(sentKeys.contains(FREE_CHARGING_KEY))
+        assertFalse(sentKeys.contains(FREE_CHARGING_ID_TAG_KEY))
     }
 
     @Test
@@ -136,8 +115,7 @@ class ChargerBootstrapperTest {
         bootstrapper.bootstrap(CHARGER_ID)
 
         assertEquals(
-            CHANGES_WITHOUT_INTERVAL_WITH_ACTUATION + ALL_INTERVAL_CANDIDATES_REJECTED +
-                CONFIGURATION_READS + TELEMETRY_TRIGGERS,
+            CHANGE_SAMPLED_DATA + ALL_INTERVAL_CANDIDATES_REJECTED + CONFIGURATION_READS + TELEMETRY_TRIGGERS,
             actions.size,
         )
         assertEquals(OcppActions.TRIGGER_MESSAGE, actions.last())
@@ -173,19 +151,19 @@ class ChargerBootstrapperTest {
         assertTrue(bootstrapper.bootstrapOnceAsync(CHARGER_ID))
         assertFalse(bootstrapper.bootstrapOnceAsync(CHARGER_ID))
 
-        awaitActions(BOOTSTRAP_CALLS_WITH_ACTUATION)
+        awaitActions(BOOTSTRAP_CALLS)
     }
 
     @Test
     @Story("Einmal pro Sitzung")
     fun reconnectStartsBootstrapAgain() {
         assertTrue(bootstrapper.bootstrapOnceAsync(CHARGER_ID))
-        awaitActions(BOOTSTRAP_CALLS_WITH_ACTUATION)
+        awaitActions(BOOTSTRAP_CALLS)
         reconnect()
 
         assertTrue(bootstrapper.bootstrapOnceAsync(CHARGER_ID))
 
-        awaitActions(2 * BOOTSTRAP_CALLS_WITH_ACTUATION)
+        awaitActions(2 * BOOTSTRAP_CALLS)
     }
 
     @Test
@@ -206,8 +184,8 @@ class ChargerBootstrapperTest {
         assertFalse(bootstrapper.bootstrapOnceAsync(CHARGER_ID))
     }
 
-    private fun createBootstrapper(actuationEnabled: Boolean) {
-        val settings = AppProperties(control = ControlProperties(actuationEnabled = actuationEnabled))
+    private fun createBootstrapper() {
+        val settings = AppProperties()
         profiles = ChargingProfileService(registry, settings, clock)
         bootstrapper = ChargerBootstrapper(registry, profiles, settings)
     }
