@@ -19,6 +19,7 @@ class OcppChargerSession(
 
     @Synchronized
     override fun sendFrame(frame: OcppFrame) {
+        if (!webSocket.isOpen) throw IllegalStateException("OCPP-Verbindung von $chargePointId ist geschlossen")
         webSocket.sendMessage(TextMessage(OcppFrameCodec.serialize(frame)))
     }
 
