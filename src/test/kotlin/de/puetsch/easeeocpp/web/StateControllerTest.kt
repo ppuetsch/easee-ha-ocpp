@@ -1,5 +1,6 @@
 package de.puetsch.easeeocpp.web
 
+import de.puetsch.easeeocpp.config.AppProperties
 import de.puetsch.easeeocpp.control.ControlStateStore
 import io.mockk.every
 import io.mockk.mockk
@@ -10,6 +11,7 @@ import org.hamcrest.Matchers.containsString
 import org.hamcrest.Matchers.not
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
+import org.springframework.boot.context.properties.EnableConfigurationProperties
 import org.springframework.boot.test.context.TestConfiguration
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest
 import org.springframework.context.annotation.Bean
@@ -25,6 +27,7 @@ import java.time.ZoneOffset
 @Feature("Controller")
 @WebMvcTest(controllers = [StateController::class, StateApiController::class])
 @Import(StateViewFactory::class)
+@EnableConfigurationProperties(AppProperties::class)
 class StateControllerTest {
 
     @Autowired
