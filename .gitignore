@@ -37,3 +37,4 @@ secrets/
 allure-results/
 allure-report/
 data/
+.claude/
