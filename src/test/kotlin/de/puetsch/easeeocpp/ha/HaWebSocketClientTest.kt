@@ -6,6 +6,7 @@ import de.puetsch.easeeocpp.testsupport.FakeHomeAssistantServer
 import io.qameta.allure.Epic
 import io.qameta.allure.Feature
 import io.qameta.allure.Story
+import org.awaitility.Awaitility.await
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
@@ -14,8 +15,13 @@ import org.junit.jupiter.api.Test
 import java.time.Duration
 
 private const val SHORT_COMMAND_TIMEOUT_MILLIS = 200L
+private const val SHORT_PING_INTERVAL_MILLIS = 50L
+private const val PINGS_OBSERVED = 5
+private const val UNANSWERED_CALLS_UNTIL_DROP = 3
 private const val LARGE_STATES_COUNT = 500
 private const val STATES_FRAGMENT_BYTES = 64
+private val REJECTION_OBSERVATION: Duration = Duration.ofMillis(600)
+private val AWAIT_MAX: Duration = Duration.ofSeconds(5)
 
 @Epic("Home Assistant")
 @Feature("WebSocket-Client")
@@ -43,13 +49,53 @@ class HaWebSocketClientTest {
 
     @Test
     @Story("Auth")
-    fun `abgelehnter Token fuehrt nicht zu einer Verbindung`() {
+    fun `abgelehnter Token fuehrt nicht zu einer Verbindung und keinem Wiederholversuch`() {
         val server = startServer(acceptedToken = "richtiger-token")
         val client = startClient(server, token = "falscher-token")
 
-        awaitCondition { server.rejectedAuthCount.get() >= 1 }
+        awaitCondition { client.connectionProblem() != null }
+        await().during(REJECTION_OBSERVATION).atMost(AWAIT_MAX).until { server.rejectedAuthCount.get() == 1 }
 
         assertFalse(client.isConnected())
+        assertTrue(client.connectionProblem()!!.startsWith("Token abgelehnt"))
+    }
+
+    @Test
+    @Story("Heartbeat")
+    fun `ausbleibende Pongs bauen die halboffene Verbindung ab und verbinden neu`() {
+        val server = startServer()
+        server.answerPings = false
+        startClient(server, pingInterval = Duration.ofMillis(SHORT_PING_INTERVAL_MILLIS))
+
+        awaitCondition { server.authSuccessCount.get() >= 2 }
+
+        assertTrue(server.receivedPingCount.get() >= 2)
+    }
+
+    @Test
+    @Story("Heartbeat")
+    fun `Pongs halten die Verbindung am Leben`() {
+        val server = startServer()
+        val client = startClient(server, pingInterval = Duration.ofMillis(SHORT_PING_INTERVAL_MILLIS))
+        awaitCondition { client.isConnected() }
+
+        awaitCondition { server.receivedPingCount.get() >= PINGS_OBSERVED }
+
+        assertTrue(client.isConnected())
+        assertEquals(1, server.authSuccessCount.get())
+    }
+
+    @Test
+    @Story("call_service")
+    fun `drei Service-Aufrufe ohne Antwort in Folge bauen die Verbindung ab`() {
+        val server = startServer()
+        server.answerServiceCalls = false
+        val client = startClient(server, commandTimeout = Duration.ofMillis(SHORT_COMMAND_TIMEOUT_MILLIS))
+        awaitCondition { client.isConnected() }
+
+        repeat(UNANSWERED_CALLS_UNTIL_DROP) { client.callService("input_boolean", "turn_on", emptyMap()) }
+
+        awaitCondition { server.authSuccessCount.get() >= 2 }
     }
 
     @Test
@@ -168,8 +214,13 @@ class HaWebSocketClientTest {
         server: FakeHomeAssistantServer,
         token: String = FAKE_HA_DEFAULT_TOKEN,
         commandTimeout: Duration = Duration.ofSeconds(10),
+        pingInterval: Duration = Duration.ofSeconds(20),
     ): HaWebSocketClient {
-        val client = HaWebSocketClient(haProperties(server.port, token), commandTimeout = commandTimeout)
+        val client = HaWebSocketClient(
+            haProperties(server.port, token),
+            commandTimeout = commandTimeout,
+            pingInterval = pingInterval,
+        )
         clients.add(client)
         client.start()
         return client

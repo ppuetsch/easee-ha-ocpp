@@ -66,6 +66,11 @@ class FakeHomeAssistantServer(
     @Volatile
     var answerServiceCalls = true
 
+    @Volatile
+    var answerPings = true
+
+    val receivedPingCount = AtomicInteger()
+
     @get:JvmName("listeningPort")
     val port: Int
         get() = getPort()
@@ -113,10 +118,17 @@ class FakeHomeAssistantServer(
             "get_states" -> sendStates(connection, request.get("id").asLong())
             "subscribe_events" -> subscribe(connection, request.get("id").asLong())
             "call_service" -> recordServiceCall(connection, request)
+            "ping" -> answerPing(connection, request.get("id").asLong())
         }
     }
 
     override fun onError(connection: WebSocket?, exception: Exception?) = Unit
+
+    private fun answerPing(connection: WebSocket, id: Long) {
+        receivedPingCount.incrementAndGet()
+        if (!answerPings) return
+        send(connection, mapOf("type" to "pong", "id" to id))
+    }
 
     private fun handleAuth(connection: WebSocket, token: String) {
         if (token == acceptedToken) {

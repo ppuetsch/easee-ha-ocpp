@@ -73,10 +73,25 @@ class HaMessagesTest {
         val otherEvent = HaMessageCodec.parse(
             """{"id":2,"type":"event","event":{"event_type":"call_service","data":{}}}""",
         )
-        val unknown = HaMessageCodec.parse("""{"type":"pong"}""")
+        val unknown = HaMessageCodec.parse("""{"type":"something_new"}""")
 
         assertEquals(HaInboundMessage.Unknown, otherEvent)
         assertEquals(HaInboundMessage.Unknown, unknown)
+    }
+
+    @Test
+    @Story("Heartbeat")
+    fun `pong wird als Antwort auf den Ping erkannt`() {
+        assertEquals(HaInboundMessage.Pong, HaMessageCodec.parse("""{"id":5,"type":"pong"}"""))
+    }
+
+    @Test
+    @Story("Heartbeat")
+    fun `ping wird mit Typ ping und Id gesendet`() {
+        val sent = mapper.readTree(HaMessageCodec.pingMessage(7))
+
+        assertEquals("ping", sent.get("type").asString())
+        assertEquals(7L, sent.get("id").asLong())
     }
 
     @Test

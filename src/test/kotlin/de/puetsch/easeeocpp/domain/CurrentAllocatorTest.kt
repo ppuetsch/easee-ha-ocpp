@@ -80,10 +80,26 @@ class CurrentAllocatorTest {
     }
 
     @Test
-    fun `other charger is capped at maximum charge current when priority is not eligible`() {
+    fun `one phase lets the other charger take the full current when priority is not eligible`() {
         val result = allocate(total = 32, phaseMode = PhaseMode.ONE, eligible = setOf(otherCharger))
 
         assertLimits(result, priority = 0, other = 32)
+    }
+
+    @Test
+    fun `three phases cap the other charger at 16 A when priority is not eligible`() {
+        val result = allocate(total = 32, phaseMode = PhaseMode.THREE, eligible = setOf(otherCharger))
+
+        assertLimits(result, priority = 0, other = 16)
+    }
+
+    @Test
+    fun `three phases cap the other charger at 16 A even if max charge current is higher`() {
+        val properties = ControlProperties(maxChargeCurrent = 32)
+
+        val result = allocate(total = 32, phaseMode = PhaseMode.THREE, eligible = setOf(otherCharger), properties = properties)
+
+        assertLimits(result, priority = 0, other = 16)
     }
 
     @Test

@@ -9,6 +9,7 @@ import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertNotNull
 import org.junit.jupiter.api.Assertions.assertNull
+import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir
@@ -239,5 +240,84 @@ class ControlLoopTest {
         harness.runCycle()
 
         assertEquals(listOf("limit:$MULTONNEN_ID:0", "limit:$EINGANGSSEITE_ID:7"), harness.charging.calls.takeLast(2))
+    }
+
+    @Test
+    @Story("HA-Token abgelehnt")
+    fun `rejected home assistant token skips the cycle without actuation`() {
+        val harness = harness()
+        harness.states.problem = "Token abgelehnt: Invalid access token"
+
+        harness.runCycle()
+
+        assertTrue(harness.charging.calls.isEmpty())
+        assertEquals(SKIP_HA_TOKEN_REJECTED, harness.state().skippedReason)
+        assertFalse(harness.state().haConnected)
+    }
+
+    @Test
+    @Story("Fehlgeschlagener Phasenwechsel")
+    fun `failed phase mode change is retried with a growing waiting time`() {
+        val harness = harness()
+        harness.charging.failingPhaseMode = true
+        harness.runCycle()
+        harness.charging.calls.clear()
+
+        harness.clock.advance(Duration.ofSeconds(31))
+        harness.runCycle()
+        harness.charging.calls.clear()
+
+        harness.clock.advance(Duration.ofSeconds(30))
+        harness.runCycle()
+        assertTrue(harness.charging.calls.none { it.startsWith("phase:") })
+
+        harness.clock.advance(Duration.ofSeconds(30))
+        harness.runCycle()
+        assertTrue(harness.charging.calls.any { it.startsWith("phase:") })
+    }
+
+    @Test
+    @Story("Fehlgeschlagener Phasenwechsel")
+    fun `failed phase mode change does not block the limit change`() {
+        val harness = harness()
+        harness.runCycle()
+        harness.charging.calls.clear()
+        harness.charging.failingPhaseMode = true
+        harness.clock.advance(Duration.ofSeconds(31))
+        harness.setEntity(harness.properties.ha.entities.pvSurplusCharge, "off")
+        harness.setEntity(harness.properties.ha.entities.targetPhases, "1")
+        harness.setEntity(harness.properties.ha.entities.targetCurrent, "10.0")
+
+        harness.runCycle()
+
+        assertEquals(
+            listOf(
+                "phase:$MULTONNEN_ID:1",
+                "phase:$EINGANGSSEITE_ID:1",
+                "limit:$MULTONNEN_ID:10",
+                "limit:$EINGANGSSEITE_ID:0",
+            ),
+            harness.charging.calls,
+        )
+    }
+
+    @Test
+    @Story("Fehler im Zyklus")
+    fun `plain error in a cycle is recorded and does not stop the loop`() {
+        val harness = harness()
+        harness.charging.snapshotFailure = AssertionError("Invariante verletzt")
+
+        harness.runCycle()
+
+        assertEquals("Regelzyklus fehlgeschlagen: Invariante verletzt", harness.state().lastError)
+    }
+
+    @Test
+    @Story("Fehler im Zyklus")
+    fun `virtual machine error is not swallowed`() {
+        val harness = harness()
+        harness.charging.snapshotFailure = OutOfMemoryError("simuliert")
+
+        assertThrows(OutOfMemoryError::class.java) { harness.runCycle() }
     }
 }
