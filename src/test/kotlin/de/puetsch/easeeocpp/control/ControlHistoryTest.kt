@@ -15,6 +15,9 @@ import java.nio.file.Files
 import java.nio.file.Path
 import java.time.Instant
 
+private const val OVERSIZED_BYTES = 1_100_000
+private const val TAIL_WINDOW_OVERFLOW_BYTES = 100_000
+
 @Epic("Regelung")
 @Feature("Verlauf")
 class ControlHistoryTest {
@@ -102,6 +105,61 @@ class ControlHistoryTest {
 
         assertEquals(listOf(action(minute = 0)), history.recent())
     }
+
+    @Test
+    @Story("Routine")
+    fun `successful profile refreshes are not recorded`() {
+        val history = ControlHistory(historyProperties(tempDir.resolve("history.jsonl")))
+
+        history.record(refresh(outcome = OUTCOME_SENT))
+
+        assertTrue(history.recent().isEmpty())
+    }
+
+    @Test
+    @Story("Routine")
+    fun `failed profile refresh is recorded`() {
+        val history = ControlHistory(historyProperties(tempDir.resolve("history.jsonl")))
+
+        history.record(refresh(outcome = OUTCOME_FAILED_PREFIX + "Cloud nicht erreichbar"))
+
+        assertEquals(1, history.recent().size)
+    }
+
+    @Test
+    @Story("Rotation")
+    fun `file above one megabyte is moved to a single backup`() {
+        val file = tempDir.resolve("history.jsonl")
+        Files.writeString(file, "x".repeat(OVERSIZED_BYTES))
+
+        ControlHistory(historyProperties(file)).record(action(minute = 0))
+
+        assertEquals(OVERSIZED_BYTES.toLong(), Files.size(tempDir.resolve("history.jsonl.1")))
+        assertEquals(1, Files.readAllLines(file).size)
+    }
+
+    @Test
+    @Story("Laden")
+    fun `loading ignores the partial line at the start of the read window`() {
+        val file = tempDir.resolve("history.jsonl")
+        ControlHistory(historyProperties(file)).apply {
+            record(action(minute = 0))
+            record(action(minute = 1))
+        }
+        val validContent = Files.readString(file)
+        Files.writeString(file, "y".repeat(TAIL_WINDOW_OVERFLOW_BYTES) + "\n" + validContent)
+
+        assertEquals(listOf(action(minute = 0), action(minute = 1)), ControlHistory(historyProperties(file)).recent())
+    }
+
+    private fun refresh(outcome: String): ControlAction = ControlAction(
+        at = CONTROL_START,
+        chargerId = MULTONNEN_ID,
+        kind = KIND_CURRENT_REFRESH,
+        phaseMode = null,
+        current = 7,
+        outcome = outcome,
+    )
 
     @Test
     @Story("Zeitstempel")

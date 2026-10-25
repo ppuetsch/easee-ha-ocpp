@@ -19,6 +19,8 @@ private const val TYPE_EVENT = "event"
 private const val TYPE_GET_STATES = "get_states"
 private const val TYPE_SUBSCRIBE_EVENTS = "subscribe_events"
 private const val TYPE_CALL_SERVICE = "call_service"
+private const val TYPE_PING = "ping"
+private const val TYPE_PONG = "pong"
 private const val EVENT_STATE_CHANGED = "state_changed"
 
 private const val FIELD_TYPE = "type"
@@ -44,6 +46,7 @@ internal sealed interface HaInboundMessage {
     data object AuthRequired : HaInboundMessage
     data object AuthOk : HaInboundMessage
     data class AuthInvalid(val reason: String) : HaInboundMessage
+    data object Pong : HaInboundMessage
     data class Result(
         val id: Long,
         val success: Boolean,
@@ -67,6 +70,7 @@ internal object HaMessageCodec {
             TYPE_AUTH_INVALID -> HaInboundMessage.AuthInvalid(node.textOf(FIELD_MESSAGE).orEmpty())
             TYPE_RESULT -> parseResult(node)
             TYPE_EVENT -> parseEvent(node)
+            TYPE_PONG -> HaInboundMessage.Pong
             else -> HaInboundMessage.Unknown
         }
     }
@@ -78,6 +82,8 @@ internal object HaMessageCodec {
         write(mapper.createObjectNode().put(FIELD_TYPE, TYPE_AUTH).put(FIELD_ACCESS_TOKEN, accessToken))
 
     fun getStatesMessage(id: Long): String = write(command(id, TYPE_GET_STATES))
+
+    fun pingMessage(id: Long): String = write(command(id, TYPE_PING))
 
     fun subscribeStateChangedMessage(id: Long): String =
         write(command(id, TYPE_SUBSCRIBE_EVENTS).put(FIELD_EVENT_TYPE, EVENT_STATE_CHANGED))

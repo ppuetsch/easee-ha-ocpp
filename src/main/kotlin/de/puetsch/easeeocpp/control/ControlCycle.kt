@@ -35,6 +35,7 @@ class ControlCycle(
     private val properties: AppProperties,
 ) {
     private val priorityChargerSelector = PriorityChargerSelector(properties.control.pauseDelay)
+    private val stickyEligibility = StickyEligibility(eligibilityPolicy)
     private val chargerIds: List<ChargerId> = properties.chargers.map { it.id }
 
     fun evaluate(readings: HaReadings, snapshots: List<ChargerSnapshot>, now: Instant): ControlEvaluation {
@@ -85,7 +86,7 @@ class ControlCycle(
         now: Instant,
     ): AllocationResult {
         val eligibleChargers = snapshots
-            .filter { eligibilityPolicy.isEligible(it, now) }
+            .filter { stickyEligibility.isEligible(it, now) }
             .mapTo(mutableSetOf()) { it.chargerId }
         return currentAllocator.allocate(
             totalCurrent = demand.totalCurrent,

@@ -16,7 +16,7 @@ class EligibilityPolicy(private val properties: ControlProperties) {
     fun isEligible(snapshot: ChargerSnapshot, now: Instant): Boolean =
         snapshot.connected && snapshot.status.hasVehiclePluggedIn() && !hasWaitedTooLong(snapshot, now)
 
-    private fun hasWaitedTooLong(snapshot: ChargerSnapshot, now: Instant): Boolean {
+    fun hasWaitedTooLong(snapshot: ChargerSnapshot, now: Instant): Boolean {
         if (snapshot.status !in WAITING_STATUSES) return false
         val statusSince = snapshot.statusSince ?: return false
         return Duration.between(statusSince, now) > properties.ineligibleAfter

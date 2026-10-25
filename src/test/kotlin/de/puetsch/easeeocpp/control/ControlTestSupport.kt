@@ -15,6 +15,7 @@ import de.puetsch.easeeocpp.domain.model.ChargerStatus
 import de.puetsch.easeeocpp.domain.model.EntityId
 import de.puetsch.easeeocpp.domain.model.PhaseMode
 import de.puetsch.easeeocpp.domain.model.Watt
+import de.puetsch.easeeocpp.ha.HaConnectionProblemSource
 import de.puetsch.easeeocpp.ha.HaHeartbeatPublisher
 import de.puetsch.easeeocpp.ports.ActuationResult
 import de.puetsch.easeeocpp.ports.ChargerFleet
@@ -31,11 +32,14 @@ const val EINGANGSSEITE_ID: ChargerId = "EH2NSSVK"
 val CONTROL_START: Instant = Instant.parse("2026-10-25T10:00:00Z")
 
 /** Stellt die Home-Assistant-Eingänge in einem Test ein. Fehlende Einträge gelten als fehlend. */
-class FakeHomeAssistantStates : HomeAssistantStates {
+class FakeHomeAssistantStates : HomeAssistantStates, HaConnectionProblemSource {
     var connected: Boolean = true
+    var problem: String? = null
     private val entries = mutableMapOf<EntityId, HaEntityState>()
 
     override fun isConnected(): Boolean = connected
+
+    override fun connectionProblem(): String? = problem
 
     override fun state(entityId: EntityId): HaEntityState? = entries[entityId]
 
@@ -55,7 +59,7 @@ class FakeHomeAssistantStates : HomeAssistantStates {
 class FakeCharging : ChargerFleet, PhaseModeGateway {
     val calls: MutableList<String> = mutableListOf()
     var snapshots: List<ChargerSnapshot> = emptyList()
-    var snapshotFailure: RuntimeException? = null
+    var snapshotFailure: Throwable? = null
     var failingPhaseMode: Boolean = false
 
     override fun snapshots(): List<ChargerSnapshot> {
@@ -149,6 +153,7 @@ class ControlHarness(historyFile: Path, control: ControlProperties = defaultCont
         return ControlLoop(
             settingsReader = HaSettingsReader(states, properties),
             haStates = states,
+            connectionProblems = states,
             chargerFleet = charging,
             phaseModeGateway = charging,
             cycle = cycle,

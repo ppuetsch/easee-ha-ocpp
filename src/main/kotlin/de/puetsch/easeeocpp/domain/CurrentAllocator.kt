@@ -7,6 +7,8 @@ import de.puetsch.easeeocpp.domain.model.ChargerId
 import de.puetsch.easeeocpp.domain.model.ChargerLimit
 import de.puetsch.easeeocpp.domain.model.PhaseMode
 
+private const val CHARGERS_NEEDING_MINIMUM_FOR_REBALANCE = 2
+
 /**
  * Verteilt den Gesamtstrom auf zwei Charger: der Prio-Charger bekommt bis zu seiner Phasen-Obergrenze,
  * der Rest geht an den anderen. Die Summe bleibt durch die Circuit-Grenze pro Phase begrenzt.
@@ -58,7 +60,7 @@ class CurrentAllocator(private val properties: ControlProperties) {
         otherEligible: Boolean,
     ): CurrentSplit = when {
         !priorityEligible && !otherEligible -> CurrentSplit(priority = 0, other = 0)
-        !priorityEligible -> CurrentSplit(priority = 0, other = otherCharge(total))
+        !priorityEligible -> CurrentSplit(priority = 0, other = otherCharge(total, priorityCap))
         !otherEligible -> CurrentSplit(priority = priorityCharge(total, priorityCap), other = 0)
         else -> splitBetweenBothEligible(total, priorityCap)
     }
@@ -69,7 +71,7 @@ class CurrentAllocator(private val properties: ControlProperties) {
         if (shouldRebalanceForMinCurrent(total, rest)) {
             return CurrentSplit(priority = total - properties.minChargeCurrent, other = properties.minChargeCurrent)
         }
-        return CurrentSplit(priority = priority, other = otherCharge(rest))
+        return CurrentSplit(priority = priority, other = otherCharge(rest, priorityCap))
     }
 
     /**
@@ -79,13 +81,14 @@ class CurrentAllocator(private val properties: ControlProperties) {
     private fun shouldRebalanceForMinCurrent(total: Ampere, rest: Ampere): Boolean =
         properties.allowRebalanceForMinCurrent &&
             rest < properties.minChargeCurrent &&
-            total >= 2 * properties.minChargeCurrent
+            total >= CHARGERS_NEEDING_MINIMUM_FOR_REBALANCE * properties.minChargeCurrent
 
     private fun priorityCharge(total: Ampere, priorityCap: Ampere): Ampere =
         belowMinimumToZero(minOf(total, priorityCap))
 
-    private fun otherCharge(amount: Ampere): Ampere =
-        belowMinimumToZero(minOf(amount, properties.maxChargeCurrent))
+    /** Beide Charger hängen an derselben Phasen-Konfiguration, daher gilt für beide dieselbe Obergrenze. */
+    private fun otherCharge(amount: Ampere, priorityCap: Ampere): Ampere =
+        belowMinimumToZero(minOf(amount, priorityCap))
 
     private fun belowMinimumToZero(amount: Ampere): Ampere =
         if (amount < properties.minChargeCurrent) 0 else amount

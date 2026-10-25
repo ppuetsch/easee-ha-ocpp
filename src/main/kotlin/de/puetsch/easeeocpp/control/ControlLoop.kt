@@ -6,6 +6,7 @@ import de.puetsch.easeeocpp.domain.model.ControlAction
 import de.puetsch.easeeocpp.domain.model.ControlDecision
 import de.puetsch.easeeocpp.domain.model.ChargerSnapshot
 import de.puetsch.easeeocpp.domain.model.PhaseMode
+import de.puetsch.easeeocpp.ha.HaConnectionProblemSource
 import de.puetsch.easeeocpp.ports.ActuationResult
 import de.puetsch.easeeocpp.ports.ChargerFleet
 import de.puetsch.easeeocpp.ports.HomeAssistantStates
@@ -25,11 +26,19 @@ const val KIND_CURRENT_REFRESH = "CURRENT_REFRESH"
 const val OUTCOME_SHADOW = "Schattenmodus – nicht gesendet"
 const val OUTCOME_SENT = "gesendet"
 const val SKIP_HA_DISCONNECTED = "HA nicht verbunden"
+const val SKIP_HA_TOKEN_REJECTED = "HA-Token abgelehnt"
 const val SKIP_MISSING_INPUT_PREFIX = "Eingang fehlt: "
 
-private const val OUTCOME_FAILED_PREFIX = "fehlgeschlagen: "
+internal const val OUTCOME_FAILED_PREFIX = "fehlgeschlagen: "
 private const val CONTROL_THREAD_NAME = "control-loop"
 private const val ERROR_PREFIX = "Regelzyklus fehlgeschlagen: "
+
+/** Ergebnis der Phasenmodus-Umschaltung: die Befehle und ob sie an allen Chargern gelungen sind. */
+private data class PhaseModeAttempt(val actions: List<ControlAction>, val applied: Boolean) {
+    companion object {
+        val NONE = PhaseModeAttempt(actions = emptyList(), applied = false)
+    }
+}
 
 /**
  * Dünner Trigger plus Zyklus: [runCycle] liest die Eingänge, rechnet und stellt nur bei echten Änderungen
@@ -40,6 +49,7 @@ private const val ERROR_PREFIX = "Regelzyklus fehlgeschlagen: "
 class ControlLoop(
     private val settingsReader: HaSettingsReader,
     private val haStates: HomeAssistantStates,
+    private val connectionProblems: HaConnectionProblemSource,
     private val chargerFleet: ChargerFleet,
     private val phaseModeGateway: PhaseModeGateway,
     private val cycle: ControlCycle,
@@ -50,6 +60,7 @@ class ControlLoop(
 ) : SmartLifecycle {
     private val log = LoggerFactory.getLogger(ControlLoop::class.java)
     private val tracker = ActuationTracker(properties.control.settleDelay)
+    private val phaseModeBackoff = PhaseModeRetryBackoff()
     private var scheduler: ScheduledExecutorService? = null
 
     @Volatile
@@ -60,23 +71,33 @@ class ControlLoop(
         try {
             executeCycle(now)
             stateHolder.update { it.copy(lastError = null) }
-        } catch (failure: Exception) {
+        } catch (failure: VirtualMachineError) {
+            throw failure
+        } catch (failure: Throwable) {
             log.warn("Regelzyklus fehlgeschlagen: {}", failure.message, failure)
             stateHolder.update { it.copy(evaluatedAt = now, lastError = ERROR_PREFIX + failure.message) }
         }
     }
 
     private fun executeCycle(now: Instant) {
-        val haConnected = haStates.isConnected()
         val snapshots = chargerFleet.snapshots()
         when {
-            !haConnected -> publishSkipped(now, haConnected, snapshots, SKIP_HA_DISCONNECTED)
-            else -> when (val reading = settingsReader.read()) {
-                is HaReadResult.MissingInput ->
-                    publishSkipped(now, haConnected, snapshots, SKIP_MISSING_INPUT_PREFIX + reading.entityId)
+            connectionProblems.connectionProblem() != null ->
+                publishSkipped(now, haConnected = false, snapshots, SKIP_HA_TOKEN_REJECTED)
 
-                is HaReadResult.Complete -> evaluateAndActuate(now, reading.readings, snapshots)
-            }
+            !haStates.isConnected() ->
+                publishSkipped(now, haConnected = false, snapshots, SKIP_HA_DISCONNECTED)
+
+            else -> readAndEvaluate(now, snapshots)
+        }
+    }
+
+    private fun readAndEvaluate(now: Instant, snapshots: List<ChargerSnapshot>) {
+        when (val reading = settingsReader.read()) {
+            is HaReadResult.MissingInput ->
+                publishSkipped(now, haConnected = true, snapshots, SKIP_MISSING_INPUT_PREFIX + reading.entityId)
+
+            is HaReadResult.Complete -> evaluateAndActuate(now, reading.readings, snapshots)
         }
     }
 
@@ -118,23 +139,39 @@ class ControlLoop(
         }
     }
 
+    /**
+     * Ein fehlgeschlagener Phasenbefehl startet keine Settle-Pause und blockiert die Stromregelung nicht.
+     * Der Settle-Delay folgt nur gelungenen Änderungen; Limit-Änderungen werden wie bisher mit Versuch gesetzt.
+     */
     private fun actuate(now: Instant, decision: ControlDecision): List<ControlAction> {
-        val phaseActions = phaseModeActionsIfChanged(now, decision.phaseMode)
+        val phaseAttempt = phaseModeActionsIfChanged(now, decision.phaseMode)
         val limits = decision.allocation.limits
         val limitsChanged = tracker.limitsChanged(limits)
         val limitActions = limitActionsIfDue(now, limits, limitsChanged)
-        if (phaseActions.isNotEmpty() || limitsChanged) tracker.startSettle(now)
-        return phaseActions + limitActions
+        if (phaseAttempt.applied || limitsChanged) tracker.startSettle(now)
+        return phaseAttempt.actions + limitActions
     }
 
-    private fun phaseModeActionsIfChanged(now: Instant, phaseMode: PhaseMode): List<ControlAction> {
-        if (!tracker.phaseModeChanged(phaseMode)) return emptyList()
+    private fun phaseModeActionsIfChanged(now: Instant, phaseMode: PhaseMode): PhaseModeAttempt {
+        val changeWanted = tracker.phaseModeChanged(phaseMode)
+        if (!changeWanted || !phaseModeBackoff.isAttemptAllowed(phaseMode, now)) return PhaseModeAttempt.NONE
         val results = properties.chargers.map { charger ->
             charger.id to actuateOrSimulate { phaseModeGateway.setPhaseMode(charger.id, phaseMode) }
         }
-        if (results.all { it.second.success }) tracker.recordPhaseMode(phaseMode)
-        return results.map { (chargerId, result) ->
+        val allApplied = results.all { it.second.success }
+        recordPhaseModeOutcome(now, phaseMode, allApplied)
+        val actions = results.map { (chargerId, result) ->
             ControlAction(now, chargerId, KIND_PHASE_MODE, phaseMode, null, outcomeOf(result))
+        }
+        return PhaseModeAttempt(actions, applied = allApplied)
+    }
+
+    private fun recordPhaseModeOutcome(now: Instant, phaseMode: PhaseMode, applied: Boolean) {
+        if (applied) {
+            tracker.recordPhaseMode(phaseMode)
+            phaseModeBackoff.recordSuccess()
+        } else {
+            phaseModeBackoff.recordFailure(phaseMode, now)
         }
     }
 

@@ -10,6 +10,7 @@ import java.util.concurrent.TimeUnit
 internal interface HaConnectionObserver {
     fun connectionReady(connection: HaConnection)
     fun connectionLost(connection: HaConnection, reason: String)
+    fun authRejected(connection: HaConnection, reason: String)
 }
 
 /**
@@ -20,6 +21,7 @@ internal class HaConnection(
     private val accessToken: String,
     private val stateCache: HaStateCache,
     private val commands: HaCommandRegistry,
+    private val liveness: HaLivenessMonitor,
     private val observer: HaConnectionObserver,
 ) : WebSocket.Listener {
     private val textFragments = StringBuilder()
@@ -45,6 +47,11 @@ internal class HaConnection(
 
     fun close() {
         webSocket?.sendClose(WebSocket.NORMAL_CLOSURE, CLOSE_REASON_SHUTDOWN)
+    }
+
+    /** Baut eine als tot erkannte Verbindung hart ab; anschließend greift der Reconnect-Backoff. */
+    fun abort(reason: String) {
+        reportLost(reason)
     }
 
     override fun onOpen(webSocket: WebSocket) {
@@ -84,7 +91,8 @@ internal class HaConnection(
         when (val message = HaMessageCodec.parse(text)) {
             HaInboundMessage.AuthRequired -> send(HaMessageCodec.authMessage(accessToken))
             HaInboundMessage.AuthOk -> requestStates()
-            is HaInboundMessage.AuthInvalid -> reportLost("Token abgelehnt: ${message.reason}")
+            is HaInboundMessage.AuthInvalid -> rejectAuthentication(message.reason)
+            HaInboundMessage.Pong -> liveness.pongReceived()
             is HaInboundMessage.Result -> handleResult(message)
             is HaInboundMessage.StateChanged -> applyStateChange(message)
             HaInboundMessage.Unknown -> Unit
@@ -133,11 +141,19 @@ internal class HaConnection(
     }
 
     private fun reportLost(reason: String) {
+        closeOnce { observer.connectionLost(this, reason) }
+    }
+
+    private fun rejectAuthentication(reason: String) {
+        closeOnce { observer.authRejected(this, reason) }
+    }
+
+    private fun closeOnce(notifyObserver: () -> Unit) {
         if (lossReported) return
         lossReported = true
         ready = false
         webSocket?.abort()
-        observer.connectionLost(this, reason)
+        notifyObserver()
     }
 
     private companion object {
