@@ -1,0 +1,16 @@
+<!DOCTYPE html>
+<html lang="de" xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Easee PV-Laden – Status</title>
+    <link rel="stylesheet" href="/css/state.css">
+    <script src="/js/refresh.js" defer></script>
+</head>
+<body>
+<header class="kopf">
+    <h1>Easee PV-Laden</h1>
+</header>
+<main id="zustand" class="inhalt" th:insert="~{fragments/state :: inhalt}"></main>
+</body>
+</html>
