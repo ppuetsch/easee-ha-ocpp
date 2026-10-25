@@ -93,9 +93,22 @@ class OcppInboundRouterTest {
         val first = routeResult("StartTransaction", payload)
         val second = routeResult("StartTransaction", payload)
 
-        assertEquals(1, first.path("transactionId").asInt())
-        assertEquals(2, second.path("transactionId").asInt())
+        val seedFromClock = TEST_START_INSTANT.epochSecond.toInt()
+        assertEquals(seedFromClock, first.path("transactionId").asInt())
+        assertEquals(seedFromClock + 1, second.path("transactionId").asInt())
         assertEquals("Accepted", first.path("idTagInfo").path("status").asText())
+    }
+
+    @Test
+    @Story("StatusNotification")
+    fun connectorZeroStatusDoesNotOverwriteVehicleStatus() {
+        val result = routeResult(
+            "StatusNotification",
+            """{"connectorId":0,"errorCode":"NoError","status":"Faulted"}""",
+        )
+
+        verify(exactly = 0) { tracker.onStatusChanged(any(), any()) }
+        assertEquals(0, result.size())
     }
 
     @Test

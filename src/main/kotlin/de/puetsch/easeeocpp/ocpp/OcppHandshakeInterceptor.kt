@@ -3,6 +3,8 @@ package de.puetsch.easeeocpp.ocpp
 import de.puetsch.easeeocpp.config.AppProperties
 import de.puetsch.easeeocpp.domain.model.ChargerId
 import org.slf4j.LoggerFactory
+import org.springframework.boot.context.event.ApplicationReadyEvent
+import org.springframework.context.event.EventListener
 import org.springframework.http.HttpHeaders
 import org.springframework.http.HttpStatus
 import org.springframework.http.server.ServerHttpRequest
@@ -16,10 +18,13 @@ import java.util.Base64
 
 const val CHARGE_POINT_ID_ATTRIBUTE = "chargePointId"
 private const val BASIC_AUTH_PREFIX = "Basic "
+private const val SUBPROTOCOL_LIST_SEPARATOR = ','
+private const val SEC_WEBSOCKET_PROTOCOL_HEADER = "Sec-WebSocket-Protocol"
 
 /**
- * HTTP-Basic-Auth: Benutzer ist die ChargePointId, Passwort das konfigurierte Geheimnis.
- * Ein leeres Passwort schaltet die Prüfung ab und ist nur für Tests gedacht.
+ * Prüft Subprotokoll, HTTP-Basic-Auth und die konfigurierte ChargePointId, bevor die WebSocket-Verbindung entsteht.
+ * Benutzer ist die ChargePointId, Passwort das konfigurierte Geheimnis. Ohne Passwort werden alle Verbindungen
+ * abgelehnt, außer `ocpp.allowAnonymous=true` ist gesetzt (nur für Tests gedacht).
  */
 @Component
 class OcppHandshakeInterceptor(private val settings: AppProperties) : HandshakeInterceptor {
@@ -32,6 +37,11 @@ class OcppHandshakeInterceptor(private val settings: AppProperties) : HandshakeI
         attributes: MutableMap<String, Any>,
     ): Boolean {
         val chargePointId = chargePointIdFromPath(request.uri.path)
+        if (!requestsOcppSubprotocol(request)) {
+            logger.warn("Handshake von {} ohne Subprotokoll {} abgelehnt", chargePointId, OCPP_SUBPROTOCOL)
+            response.setStatusCode(HttpStatus.BAD_REQUEST)
+            return false
+        }
         if (!isAuthorized(request, chargePointId)) {
             logger.warn("Handshake von {} ohne gültige Basic-Auth abgelehnt", chargePointId)
             response.setStatusCode(HttpStatus.UNAUTHORIZED)
@@ -54,14 +64,32 @@ class OcppHandshakeInterceptor(private val settings: AppProperties) : HandshakeI
         exception: Exception?,
     ) = Unit
 
+    /** Warnt beim Start, wenn das Fehlen des Passworts dazu führt, dass kein Charger sich verbinden kann oder jeder darf. */
+    @EventListener(ApplicationReadyEvent::class)
+    fun warnIfPasswordMissing() {
+        if (settings.ocpp.basicAuthPassword.isNotEmpty()) return
+        if (settings.ocpp.allowAnonymous) {
+            logger.warn(
+                "OCPP: ocpp.allowAnonymous=true und kein Passwort - JEDER kann sich als Charger verbinden. Nur für Tests!",
+            )
+        } else {
+            logger.warn("OCPP: OCPP_BASIC_AUTH_PASSWORD ist leer - ALLE Charger-Verbindungen werden mit 401 abgelehnt.")
+        }
+    }
+
     private fun chargePointIdFromPath(path: String): ChargerId = path.substringAfterLast('/')
 
     private fun isConfiguredCharger(chargePointId: ChargerId): Boolean =
         settings.chargers.any { it.id == chargePointId }
 
+    private fun requestsOcppSubprotocol(request: ServerHttpRequest): Boolean =
+        request.headers[SEC_WEBSOCKET_PROTOCOL_HEADER].orEmpty()
+            .flatMap { it.split(SUBPROTOCOL_LIST_SEPARATOR) }
+            .any { it.trim() == OCPP_SUBPROTOCOL }
+
     private fun isAuthorized(request: ServerHttpRequest, chargePointId: ChargerId): Boolean {
         val expectedPassword = settings.ocpp.basicAuthPassword
-        if (expectedPassword.isEmpty()) return true
+        if (expectedPassword.isEmpty()) return settings.ocpp.allowAnonymous
         val presentedCredentials = presentedCredentials(request)
         return presentedCredentials != null &&
             MessageDigest.isEqual(

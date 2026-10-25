@@ -20,6 +20,7 @@ data class ChargingProfile(
 @JsonInclude(JsonInclude.Include.NON_NULL)
 data class ChargingSchedule(
     val duration: Int? = null,
+    val startSchedule: String? = null,
     val chargingRateUnit: String,
     val chargingSchedulePeriod: List<ChargingSchedulePeriod>,
 )

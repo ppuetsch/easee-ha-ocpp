@@ -10,6 +10,7 @@ object OcppConfigurationKeys {
 }
 
 object OcppRequestedMessages {
+    const val STATUS_NOTIFICATION = "StatusNotification"
     const val METER_VALUES = "MeterValues"
 }
 
