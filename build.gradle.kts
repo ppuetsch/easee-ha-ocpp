@@ -37,6 +37,8 @@ dependencies {
     testImplementation("org.springframework.boot:spring-boot-starter-websocket-test")
     testImplementation("org.jetbrains.kotlin:kotlin-test-junit5")
     testImplementation("io.mockk:mockk:1.14.11")
+    testImplementation("org.java-websocket:Java-WebSocket:1.6.0")
+    testImplementation("org.bouncycastle:bcpkix-jdk18on:1.86")
     testImplementation("org.awaitility:awaitility-kotlin:4.3.0")
     testImplementation("com.microsoft.playwright:playwright:$playwrightVersion")
     testImplementation("io.qameta.allure:allure-junit5:$allureVersion")
