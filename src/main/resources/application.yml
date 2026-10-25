@@ -1,0 +1,22 @@
+server:
+  port: 8080
+spring:
+  application:
+    name: easee-ha-ocpp
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health
+easee:
+  ha:
+    token: ${HA_TOKEN:}
+  cloud:
+    username: ${EASEE_USERNAME:}
+    password: ${EASEE_PASSWORD:}
+  ocpp:
+    basic-auth-password: ${OCPP_BASIC_AUTH_PASSWORD:}
+    ssl:
+      keystore-password: ${KEYSTORE_PASSWORD:}
+  control:
+    actuation-enabled: ${ACTUATION_ENABLED:false}

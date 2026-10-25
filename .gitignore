@@ -25,3 +25,15 @@ replay_pid*
 
 # Kotlin Gradle plugin data, see https://kotlinlang.org/docs/whatsnew20.html#new-directory-for-kotlin-data-in-gradle-projects
 .kotlin/
+!gradle/wrapper/gradle-wrapper.jar
+build/
+.gradle/
+.idea/
+*.p12
+*.pem
+*.env
+.env*
+secrets/
+allure-results/
+allure-report/
+data/
