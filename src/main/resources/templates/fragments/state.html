@@ -22,13 +22,14 @@
         </dl>
         <table class="tabelle">
             <thead>
-            <tr><th>Charger</th><th>Verbindung</th><th>Status</th><th>Leistung</th><th>Letzter Messwert</th></tr>
+            <tr><th>Charger</th><th>Verbindung</th><th>Status</th><th>Auto angesteckt</th><th>Leistung</th><th>Letzter Messwert</th></tr>
             </thead>
             <tbody>
             <tr th:each="charger : ${view.verbindungen.chargers}" th:attr="data-testid='charger-' + ${charger.id}">
                 <td th:text="${charger.id}">–</td>
                 <td><span class="pille" th:classappend="${charger.verbindungKlasse}" th:text="${charger.verbindung}">–</span></td>
                 <td data-testid="charger-status" th:text="${charger.status}">–</td>
+                <td data-testid="charger-auto-angesteckt" th:text="${charger.autoAngesteckt}">–</td>
                 <td th:text="${charger.leistung}">–</td>
                 <td th:text="${charger.letzterMesswert}">–</td>
             </tr>
@@ -61,6 +62,8 @@
             <th:block th:replace="~{:: kennzahl('ergebnis-zielleistung', 'Zielleistung', ${view.ergebnis.zielleistung})}"></th:block>
             <th:block th:replace="~{:: kennzahl('ergebnis-zielstrom', 'Zielstrom', ${view.ergebnis.zielstrom})}"></th:block>
             <th:block th:replace="~{:: kennzahl('ergebnis-phase', 'Phase mit höchster Spannung', ${view.ergebnis.phaseHoechsteSpannung})}"></th:block>
+            <dt>Verteilungsmodus</dt>
+            <dd data-testid="ergebnis-verteilungsmodus" th:text="${view.ergebnis.verteilungsmodus}">–</dd>
             <dt>Verteilung je Charger</dt>
             <dd data-testid="ergebnis-verteilung">
                 <ul class="liste">

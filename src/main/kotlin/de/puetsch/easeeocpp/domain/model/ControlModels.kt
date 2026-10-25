@@ -55,6 +55,8 @@ data class ControlDecision(
     val surplus: SurplusResult?,
     val phaseWithHighestVoltage: Int?,
     val reason: String,
+    /** Name des Verteilungsmodus: PRIORITIZED, SHARED oder SINGLE_CHARGER; null, wenn kein Charger berechtigt ist. */
+    val allocationMode: String? = null,
 )
 
 data class ControlAction(

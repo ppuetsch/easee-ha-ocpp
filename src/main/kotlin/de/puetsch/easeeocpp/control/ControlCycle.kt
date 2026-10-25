@@ -16,6 +16,9 @@ import de.puetsch.easeeocpp.domain.model.SurplusInputs
 import org.springframework.stereotype.Component
 import java.time.Instant
 
+/** Verteilungsmodus, wenn nur ein Charger berechtigt ist; bekommt dann den gesamten Strom. */
+const val SINGLE_CHARGER_MODE = "SINGLE_CHARGER"
+
 data class ControlEvaluation(
     val inputs: SurplusInputs,
     val decision: ControlDecision,
@@ -36,22 +39,48 @@ class ControlCycle(
 ) {
     private val priorityChargerSelector = PriorityChargerSelector(properties.control.pauseDelay)
     private val stickyEligibility = StickyEligibility(eligibilityPolicy)
+    private val priorityModeTracker = PriorityModeTracker(properties.control)
     private val chargerIds: List<ChargerId> = properties.chargers.map { it.id }
 
-    fun evaluate(readings: HaReadings, snapshots: List<ChargerSnapshot>, now: Instant): ControlEvaluation {
+    fun evaluate(
+        readings: HaReadings,
+        snapshots: List<ChargerSnapshot>,
+        now: Instant,
+        lastAppliedLimits: Map<ChargerId, Ampere>,
+    ): ControlEvaluation {
         val inputs = readings.surplusInputs(evPower = snapshots.sumOf { it.power })
         val demand = demandFor(readings.settings, inputs)
         val activePriority = priorityChargerSelector.select(readings.settings.priorityCharger, now)
-        val allocation = allocate(demand, activePriority, snapshots, now)
+        val eligible = eligibleChargers(snapshots, now)
+        val mode = priorityModeTracker.update(now, activePriority, eligible, snapshots, lastAppliedLimits)
+        val allocation = allocate(demand, activePriority, eligible, mode)
         val decision = ControlDecision(
             decidedAt = now,
             phaseMode = demand.phaseMode,
             allocation = allocation,
             surplus = demand.surplus,
             phaseWithHighestVoltage = phaseWithHighestVoltage(snapshots, activePriority),
-            reason = ControlReason.describe(demand, readings.settings.priorityCharger, activePriority, allocation),
+            reason = ControlReason.describe(
+                demand = demand,
+                requestedPriority = readings.settings.priorityCharger,
+                activePriority = activePriority,
+                allocation = allocation,
+                distributionText = ControlReason.distributionText(eligible, mode, properties.control.priorityIdleAfter),
+            ),
+            allocationMode = allocationModeName(eligible.size, mode),
         )
         return ControlEvaluation(inputs, decision)
+    }
+
+    private fun eligibleChargers(snapshots: List<ChargerSnapshot>, now: Instant): Set<ChargerId> =
+        snapshots
+            .filter { stickyEligibility.isEligible(it, now) }
+            .mapTo(mutableSetOf()) { it.chargerId }
+
+    private fun allocationModeName(eligibleCount: Int, mode: AllocationMode): String? = when (eligibleCount) {
+        0 -> null
+        1 -> SINGLE_CHARGER_MODE
+        else -> mode.name
     }
 
     private fun demandFor(settings: ChargeSettings, inputs: SurplusInputs): ControlDemand =
@@ -82,20 +111,16 @@ class ControlCycle(
     private fun allocate(
         demand: ControlDemand,
         activePriority: ChargerId,
-        snapshots: List<ChargerSnapshot>,
-        now: Instant,
-    ): AllocationResult {
-        val eligibleChargers = snapshots
-            .filter { stickyEligibility.isEligible(it, now) }
-            .mapTo(mutableSetOf()) { it.chargerId }
-        return currentAllocator.allocate(
-            totalCurrent = demand.totalCurrent,
-            phaseMode = demand.phaseMode,
-            priorityCharger = activePriority,
-            chargerIds = chargerIds,
-            eligible = eligibleChargers,
-        )
-    }
+        eligible: Set<ChargerId>,
+        mode: AllocationMode,
+    ): AllocationResult = currentAllocator.allocate(
+        totalCurrent = demand.totalCurrent,
+        phaseMode = demand.phaseMode,
+        priorityCharger = activePriority,
+        chargerIds = chargerIds,
+        eligible = eligible,
+        sharedMode = mode == AllocationMode.SHARED,
+    )
 
     /** Nur Anzeige: die Phasenwahl wird über OCPP nicht angewendet. */
     private fun phaseWithHighestVoltage(snapshots: List<ChargerSnapshot>, activePriority: ChargerId): Int? =

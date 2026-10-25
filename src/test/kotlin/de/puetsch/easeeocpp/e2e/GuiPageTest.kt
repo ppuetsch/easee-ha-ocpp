@@ -60,7 +60,10 @@ class GuiPageTest : AbstractGuiTest() {
         assertThat(page.locator("[data-testid='ha-heartbeat']")).containsText(Pattern.compile("vor \\d+ s"))
         assertThat(chargerRow(StateFixtures.PRIO_CHARGER)).containsText("verbunden")
         assertThat(chargerRow(StateFixtures.PRIO_CHARGER).locator("[data-testid='charger-status']")).hasText("Lädt")
+        assertThat(chargerRow(StateFixtures.PRIO_CHARGER).locator("[data-testid='charger-auto-angesteckt']")).hasText("ja")
         assertThat(chargerRow(StateFixtures.SECOND_CHARGER)).containsText("getrennt")
+        assertThat(chargerRow(StateFixtures.SECOND_CHARGER).locator("[data-testid='charger-auto-angesteckt']")).hasText("nein")
+        assertShownText("ergebnis-verteilungsmodus", "Priorisiert")
     }
 
     @Test
