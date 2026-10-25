@@ -37,12 +37,14 @@ param(
     [string] $Serial,
     [string] $OcppHost = 'docker.fritz.box',
     [int] $OcppPort = 8443,
-    [string] $CaCertificatePath = (Join-Path (Split-Path -Parent $PSScriptRoot) 'secrets\ca.pem'),
+    [string] $CaCertificatePath = '',
     [switch] $SkipCircuitReset,
+    [switch] $Plain,
     [switch] $DryRun
 )
 
 $ErrorActionPreference = 'Stop'
+if (-not $CaCertificatePath) { $CaCertificatePath = Join-Path (Split-Path -Parent $PSScriptRoot) 'secrets\ca.pem' }
 . (Join-Path $PSScriptRoot 'easee-common.ps1')
 
 # Circuit des Standorts, auf dem der Charger haengt (aus dem alten Regler uebernommen).
@@ -51,7 +53,8 @@ $CIRCUIT_ID = 346122
 $CIRCUIT_MAX_CURRENT_PER_PHASE = 32
 
 function Get-OcppWebsocketUrl {
-    return "wss://${OcppHost}:${OcppPort}$OCPP_ENDPOINT_PATH"
+    $scheme = if ($Plain) { 'ws' } else { 'wss' }
+    return "${scheme}://${OcppHost}:${OcppPort}$OCPP_ENDPOINT_PATH"
 }
 
 function Get-CaCertificatePem {
@@ -83,14 +86,15 @@ function Reset-CircuitCurrent([string] $Token) {
 }
 
 function New-ConnectionDetailsBody([string] $CaPem) {
+    $connectionArgs = @{ url = (Get-OcppWebsocketUrl) }
+    if (-not $Plain) {
+        $connectionArgs.caCertificate = $CaPem
+        $connectionArgs.caCertificateDomain = $OcppHost
+    }
     return @{
-        connectivityMode       = $CONNECTIVITY_MODE_DUAL_PROTOCOL
-        websocketConnectionArgs = @{
-            url                 = (Get-OcppWebsocketUrl)
-            caCertificate       = $CaPem
-            caCertificateDomain = $OcppHost
-        }
-        basicAuthPassword      = (Get-BasicAuthPasswordForBody)
+        connectivityMode        = $CONNECTIVITY_MODE_DUAL_PROTOCOL
+        websocketConnectionArgs = $connectionArgs
+        basicAuthPassword       = (Get-BasicAuthPasswordForBody)
     }
 }
 
@@ -100,7 +104,8 @@ function Get-BasicAuthPasswordForBody {
 }
 
 function Save-ConnectionDetails([string] $Token) {
-    $body = New-ConnectionDetailsBody (Get-CaCertificatePem)
+    $caPem = if ($Plain) { '' } else { Get-CaCertificatePem }
+    $body = New-ConnectionDetailsBody $caPem
     $path = "$EASEE_CONNECTION_DETAILS_PATH/$Serial"
     $response = Invoke-EaseeRequest 'POST' $path $Token $body 'Verbindungsdaten speichern (DualProtocol)'
     if ($DryRun) { return $REDACTED_PLACEHOLDER }

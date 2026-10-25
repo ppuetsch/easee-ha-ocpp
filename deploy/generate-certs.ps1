@@ -37,7 +37,7 @@
 #>
 [CmdletBinding()]
 param(
-    [string] $OutputDir = (Join-Path (Split-Path -Parent $PSScriptRoot) 'secrets'),
+    [string] $OutputDir = '',
     [string] $CaDirectory = (Join-Path $env:USERPROFILE 'easee-ha-ocpp-ca'),
     [string] $CommonName = 'docker.fritz.box',
     [string[]] $AdditionalSans = @(),
@@ -46,6 +46,8 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+
+if (-not $OutputDir) { $OutputDir = Join-Path (Split-Path -Parent $PSScriptRoot) 'secrets' }
 
 # Laufzeiten und Schluessel-Parameter. Zertifikats-Vorgaben des Chargers sind undokumentiert (Risiko R5).
 $CA_VALIDITY_DAYS = 3650

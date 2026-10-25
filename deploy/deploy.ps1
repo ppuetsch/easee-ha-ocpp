@@ -40,7 +40,8 @@ param(
     [switch] $StopLegacy,
     [switch] $DryRun,
     [switch] $Actuate,
-    [switch] $Force
+    [switch] $Force,
+    [switch] $PlainOcpp
 )
 
 $ErrorActionPreference = 'Stop'
@@ -58,7 +59,8 @@ $CONFIRMATION_ANSWERS = @('j', 'ja', 'y', 'yes')
 $HTTP_PORT = 8080
 $OCPP_TLS_PORT = 8443
 $DATA_VOLUME = 'easee-data'
-$REQUIRED_SECRET_NAMES = @('HA_TOKEN', 'EASEE_USERNAME', 'EASEE_PASSWORD', 'OCPP_BASIC_AUTH_PASSWORD', 'KEYSTORE_PASSWORD')
+$REQUIRED_SECRET_NAMES = @('HA_TOKEN', 'EASEE_USERNAME', 'EASEE_PASSWORD', 'OCPP_BASIC_AUTH_PASSWORD')
+if (-not $PlainOcpp) { $REQUIRED_SECRET_NAMES += 'KEYSTORE_PASSWORD' }
 $PROJECT_ROOT = Split-Path -Parent $PSScriptRoot
 
 function Get-SshTarget {
@@ -232,6 +234,11 @@ function Send-EnvFile([string] $LocalPath) {
     Invoke-Remote "chmod 600 ~/$REMOTE_ENV_FILE_NAME"
 }
 
+function Get-PlainOcppArgument {
+    if ($PlainOcpp) { return '-e EASEE_OCPP_SSL_ENABLED=false ' }
+    return ''
+}
+
 function Get-RunCommand {
     $actuation = Get-ActuationValue
     return "docker run --restart always -d --name $CONTAINER_NAME " +
@@ -239,6 +246,7 @@ function Get-RunCommand {
         "-v ${DATA_VOLUME}:/data -v ${REMOTE_SECRETS_DIR}:/secrets:ro " +
         "--env-file ~/$REMOTE_ENV_FILE_NAME " +
         "-e ACTUATION_ENABLED=$actuation " +
+        (Get-PlainOcppArgument) +
         $Image
 }
 
@@ -269,11 +277,11 @@ function Show-Logs {
 
 function Invoke-Deployment {
     Assert-DeploymentPolicy
-    Assert-KeystoreFilePresent
+    if (-not $PlainOcpp) { Assert-KeystoreFilePresent }
     Stop-LegacyContainerIfRequested
     Publish-Image
     Deploy-WithEnvFile
-    Send-KeystoreFile
+    if (-not $PlainOcpp) { Send-KeystoreFile }
     Replace-Container
     Invoke-Remote "docker ps --filter 'name=^$CONTAINER_NAME`$' --format '{{.Status}}'"
     Show-Logs

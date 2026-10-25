@@ -3,6 +3,7 @@ package de.puetsch.easeeocpp.ocpp
 import de.puetsch.easeeocpp.config.AppProperties
 import de.puetsch.easeeocpp.domain.model.ChargerId
 import de.puetsch.easeeocpp.ocpp.messages.ChangeConfigurationRequest
+import de.puetsch.easeeocpp.ocpp.messages.GetConfigurationRequest
 import de.puetsch.easeeocpp.ocpp.messages.OcppConfigurationKeys
 import de.puetsch.easeeocpp.ocpp.messages.OcppRequestedMessages
 import de.puetsch.easeeocpp.ocpp.messages.TriggerMessageRequest
@@ -16,6 +17,9 @@ import java.util.concurrent.Executors
 private const val METER_VALUES_SAMPLED_DATA_VALUE =
     "Power.Active.Import,Current.Import,Voltage,Current.Offered,Energy.Active.Import.Register"
 private const val FREE_CHARGING_ENABLED = "true"
+
+// Easee lehnt kurze Messintervalle ab; die Folge probiert vom gewünschten Wert aufwärts, bis der Charger zustimmt.
+private val SAMPLE_INTERVAL_FALLBACK_SECONDS = listOf(10L, 15L, 30L, 60L)
 
 /**
  * Konfiguriert den Charger nach einer neuen Verbindung: Messwerte, Telemetrie-Trigger, dann das Regelprofil.
@@ -46,6 +50,8 @@ class ChargerBootstrapper(
         val session = sessions.find(chargerId) ?: return
         logger.info("Bootstrap von {} gestartet", chargerId)
         configurationChanges().forEach { change -> applyConfigurationChange(chargerId, session, change) }
+        negotiateSampleInterval(chargerId, session)
+        logCurrentConfiguration(chargerId, session)
         requestTelemetryMessages(chargerId, session)
         resendDesiredLimit(chargerId)
     }
@@ -63,11 +69,23 @@ class ChargerBootstrapper(
             OcppConfigurationKeys.METER_VALUES_SAMPLED_DATA,
             METER_VALUES_SAMPLED_DATA_VALUE,
         ),
-        ChangeConfigurationRequest(
-            OcppConfigurationKeys.METER_VALUE_SAMPLE_INTERVAL,
-            settings.ocpp.meterValueSampleInterval.seconds.toString(),
-        ),
     )
+
+    private fun negotiateSampleInterval(chargerId: ChargerId, session: OcppChargerSession) {
+        val wanted = settings.ocpp.meterValueSampleInterval.seconds
+        val candidates = listOf(wanted) + SAMPLE_INTERVAL_FALLBACK_SECONDS.filter { it > wanted }
+        val accepted = candidates.firstOrNull { seconds ->
+            val change = ChangeConfigurationRequest(OcppConfigurationKeys.METER_VALUE_SAMPLE_INTERVAL, seconds.toString())
+            session.call(OcppActions.CHANGE_CONFIGURATION, change).join().isAccepted()
+        }
+        if (accepted == null) logger.warn("{} akzeptiert kein MeterValueSampleInterval aus {}", chargerId, candidates)
+        else logger.info("{}: MeterValueSampleInterval {} s", chargerId, accepted)
+    }
+
+    private fun logCurrentConfiguration(chargerId: ChargerId, session: OcppChargerSession) {
+        val response = session.call(OcppActions.GET_CONFIGURATION, GetConfigurationRequest()).join()
+        logger.info("Konfiguration von {}: {}", chargerId, (response as? OcppResponse.Result)?.payload?.toString() ?: response.describe())
+    }
 
     private fun freeChargingConfigurationChanges(): List<ChangeConfigurationRequest> {
         if (!settings.control.actuationEnabled) {

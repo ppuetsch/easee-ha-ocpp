@@ -26,9 +26,13 @@ private const val EXPECTED_SAMPLED_DATA =
 private const val CONFIGURATION_CHANGES_WITH_ACTUATION = 4
 private const val CONFIGURATION_CHANGES_IN_SHADOW_MODE = 2
 private const val TELEMETRY_TRIGGERS = 2
+private const val CONFIGURATION_READS = 1
+private const val ALL_INTERVAL_CANDIDATES_REJECTED = 5
+private const val CHANGES_WITHOUT_INTERVAL_WITH_ACTUATION = 3
 private const val SET_PROFILES_FOR_BASE_AND_LIMIT = 2
 private const val SET_PROFILES_FOR_LIMIT_ONLY = 1
-private const val BOOTSTRAP_CALLS_WITH_ACTUATION = CONFIGURATION_CHANGES_WITH_ACTUATION + TELEMETRY_TRIGGERS
+private const val BOOTSTRAP_CALLS_WITH_ACTUATION =
+    CONFIGURATION_CHANGES_WITH_ACTUATION + CONFIGURATION_READS + TELEMETRY_TRIGGERS
 private val AWAIT_TIMEOUT: Duration = Duration.ofSeconds(5)
 
 @Epic("OCPP")
@@ -57,6 +61,7 @@ class ChargerBootstrapperTest {
 
         assertEquals(
             List(CONFIGURATION_CHANGES_WITH_ACTUATION) { OcppActions.CHANGE_CONFIGURATION } +
+                List(CONFIGURATION_READS) { OcppActions.GET_CONFIGURATION } +
                 List(TELEMETRY_TRIGGERS) { OcppActions.TRIGGER_MESSAGE },
             actions,
         )
@@ -96,6 +101,7 @@ class ChargerBootstrapperTest {
 
         assertEquals(
             List(CONFIGURATION_CHANGES_IN_SHADOW_MODE) { OcppActions.CHANGE_CONFIGURATION } +
+                List(CONFIGURATION_READS) { OcppActions.GET_CONFIGURATION } +
                 List(TELEMETRY_TRIGGERS) { OcppActions.TRIGGER_MESSAGE },
             actions,
         )
@@ -129,7 +135,11 @@ class ChargerBootstrapperTest {
 
         bootstrapper.bootstrap(CHARGER_ID)
 
-        assertEquals(BOOTSTRAP_CALLS_WITH_ACTUATION, actions.size)
+        assertEquals(
+            CHANGES_WITHOUT_INTERVAL_WITH_ACTUATION + ALL_INTERVAL_CANDIDATES_REJECTED +
+                CONFIGURATION_READS + TELEMETRY_TRIGGERS,
+            actions.size,
+        )
         assertEquals(OcppActions.TRIGGER_MESSAGE, actions.last())
     }
 

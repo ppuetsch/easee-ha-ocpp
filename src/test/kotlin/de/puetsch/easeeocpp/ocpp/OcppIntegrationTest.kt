@@ -72,9 +72,9 @@ class OcppIntegrationTest {
         assertEquals(
             listOf(
                 OcppConfigurationKeys.METER_VALUES_SAMPLED_DATA,
-                OcppConfigurationKeys.METER_VALUE_SAMPLE_INTERVAL,
                 OcppConfigurationKeys.FREE_CHARGING,
                 OcppConfigurationKeys.FREE_CHARGING_ID_TAG,
+                OcppConfigurationKeys.METER_VALUE_SAMPLE_INTERVAL,
             ),
             changedKeys,
         )
