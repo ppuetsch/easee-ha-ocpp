@@ -27,7 +27,7 @@ private const val CONFIGURATION_CHANGES_WITH_ACTUATION = 4
 private const val CONFIGURATION_CHANGES_IN_SHADOW_MODE = 2
 private const val TELEMETRY_TRIGGERS = 2
 private const val CONFIGURATION_READS = 1
-private const val ALL_INTERVAL_CANDIDATES_REJECTED = 5
+private const val ALL_INTERVAL_CANDIDATES_REJECTED = 2
 private const val CHANGES_WITHOUT_INTERVAL_WITH_ACTUATION = 3
 private const val SET_PROFILES_FOR_BASE_AND_LIMIT = 2
 private const val SET_PROFILES_FOR_LIMIT_ONLY = 1
@@ -74,7 +74,7 @@ class ChargerBootstrapperTest {
 
         val changes = configurationChanges().associateBy { it.key }
         assertEquals(EXPECTED_SAMPLED_DATA, changes[OcppConfigurationKeys.METER_VALUES_SAMPLED_DATA]?.value)
-        assertEquals("5", changes[OcppConfigurationKeys.METER_VALUE_SAMPLE_INTERVAL]?.value)
+        assertEquals("30", changes[OcppConfigurationKeys.METER_VALUE_SAMPLE_INTERVAL]?.value)
         assertEquals("true", changes[OcppConfigurationKeys.FREE_CHARGING]?.value)
         assertEquals("FREECHARGING", changes[OcppConfigurationKeys.FREE_CHARGING_ID_TAG]?.value)
     }

@@ -64,13 +64,13 @@ data class OcppProperties(
     val path: String = "/ocpp",
     val basicAuthPassword: String = "",
     val allowAnonymous: Boolean = false,
-    val meterValueSampleInterval: Duration = Duration.ofSeconds(5),
+    val meterValueSampleInterval: Duration = Duration.ofSeconds(30),
     val heartbeatInterval: Duration = Duration.ofSeconds(300),
     val profileDuration: Duration = Duration.ofSeconds(300),
     val freeChargingIdTag: String = "FREECHARGING",
     val useNumberPhases: Boolean = false,
     val requestTimeout: Duration = Duration.ofSeconds(30),
-    val meterValueMaxAge: Duration = Duration.ofSeconds(30),
+    val meterValueMaxAge: Duration = Duration.ofSeconds(90),
     val ssl: OcppSslProperties = OcppSslProperties(),
 )
 
