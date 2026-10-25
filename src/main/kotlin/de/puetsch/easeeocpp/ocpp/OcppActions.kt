@@ -2,6 +2,10 @@ package de.puetsch.easeeocpp.ocpp
 
 const val OCPP_SUBPROTOCOL = "ocpp1.6"
 
+/** Connector-Id 0 bezeichnet den Ladepunkt als Ganzes, 1 den Fahrzeug-Anschluss. */
+const val CONNECTOR_ID_CHARGE_POINT = 0
+const val CONNECTOR_ID_VEHICLE = 1
+
 object OcppActions {
     const val BOOT_NOTIFICATION = "BootNotification"
     const val HEARTBEAT = "Heartbeat"

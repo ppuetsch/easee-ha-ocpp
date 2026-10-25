@@ -29,13 +29,20 @@ private const val PASSWORD = "geheim"
 private const val WAIT_LIMIT_SECONDS = 5L
 private const val POLL_INTERVAL_MILLIS = 20L
 private const val CLOSED_BY_REPLACEMENT = 1008
+private const val CONFIGURATION_CHANGES_WITH_ACTUATION = 4
+private const val TELEMETRY_TRIGGERS = 2
+private const val FIRST_LIMIT_AMPERE = 16
+private const val SECOND_LIMIT_AMPERE = 10
 
 @Epic("OCPP")
 @Feature("Komponententest über echte WebSocket-Verbindung")
 @SpringBootTest(
     classes = [OcppIntegrationTest.OcppTestContext::class],
     webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
-    properties = ["easee.ocpp.basic-auth-password=$PASSWORD"],
+    properties = [
+        "easee.ocpp.basic-auth-password=$PASSWORD",
+        "easee.control.actuation-enabled=true",
+    ],
 )
 class OcppIntegrationTest {
     @field:LocalServerPort
@@ -60,7 +67,7 @@ class OcppIntegrationTest {
         val charger = connectedCharger(CHARGER_ID, PASSWORD)
 
         assertEquals("Accepted", charger.boot().payloadStatus())
-        awaitCondition { charger.callsFor(OcppActions.CHANGE_CONFIGURATION).size == 4 }
+        awaitCondition { charger.callsFor(OcppActions.CHANGE_CONFIGURATION).size == CONFIGURATION_CHANGES_WITH_ACTUATION }
         val changedKeys = charger.callsFor(OcppActions.CHANGE_CONFIGURATION).map { it.payload.path("key").asText() }
         assertEquals(
             listOf(
@@ -71,16 +78,15 @@ class OcppIntegrationTest {
             ),
             changedKeys,
         )
-        awaitCondition { charger.callsFor(OcppActions.TRIGGER_MESSAGE).size == 1 }
+        awaitCondition { charger.callsFor(OcppActions.TRIGGER_MESSAGE).size == TELEMETRY_TRIGGERS }
 
         charger.call(OcppActions.STATUS_NOTIFICATION, mapOf("connectorId" to 1, "errorCode" to "NoError", "status" to "Charging"))
         charger.call(OcppActions.METER_VALUES, meterValuesPowerKilowatt("3.5"))
-        val result = fleet.applyLimit(CHARGER_ID, 16)
+        val result = fleet.applyLimit(CHARGER_ID, FIRST_LIMIT_AMPERE)
 
         assertTrue(result.success, result.message)
-        awaitCondition { charger.callsFor(OcppActions.SET_CHARGING_PROFILE).size == 2 }
-        val limitProfile = charger.callsFor(OcppActions.SET_CHARGING_PROFILE)
-            .first { it.payload.path("csChargingProfiles").path("stackLevel").asInt() == 1 }
+        awaitCondition { limitCalls(charger, FIRST_LIMIT_AMPERE).isNotEmpty() }
+        val limitProfile = limitCalls(charger, FIRST_LIMIT_AMPERE).first()
         assertEquals(
             ChargingProfileValues.PURPOSE_CHARGE_POINT_MAX,
             limitProfile.payload.path("csChargingProfiles").path("chargingProfilePurpose").asText(),
@@ -109,9 +115,9 @@ class OcppIntegrationTest {
         assertTrue(snapshot.connected, "ersetzte Sitzung darf den Charger nicht als getrennt markieren")
         assertEquals(ChargerStatus.CHARGING, snapshot.status)
 
-        assertTrue(fleet.applyLimit(CHARGER_ID, 10).success)
-        awaitCondition { new.callsFor(OcppActions.SET_CHARGING_PROFILE).size == 2 }
-        assertTrue(old.callsFor(OcppActions.SET_CHARGING_PROFILE).isEmpty())
+        assertTrue(fleet.applyLimit(CHARGER_ID, SECOND_LIMIT_AMPERE).success)
+        awaitCondition { limitCalls(new, SECOND_LIMIT_AMPERE).isNotEmpty() }
+        assertTrue(limitCalls(old, SECOND_LIMIT_AMPERE).isEmpty())
     }
 
     @Test
@@ -172,6 +178,13 @@ class OcppIntegrationTest {
             Thread.sleep(POLL_INTERVAL_MILLIS)
         }
     }
+
+    private fun limitCalls(charger: FakeCharger, ampere: Int): List<OcppFrame.Call> =
+        charger.callsFor(OcppActions.SET_CHARGING_PROFILE).filter { limitOf(it) == ampere.toDouble() }
+
+    private fun limitOf(call: OcppFrame.Call): Double =
+        call.payload.path("csChargingProfiles").path("chargingSchedule").path("chargingSchedulePeriod").path(0)
+            .path("limit").asDouble()
 
     private fun meterValuesPowerKilowatt(kilowatt: String): Map<String, Any> = mapOf(
         "connectorId" to 1,

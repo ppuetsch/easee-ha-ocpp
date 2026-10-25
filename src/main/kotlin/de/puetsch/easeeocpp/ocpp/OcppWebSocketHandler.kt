@@ -13,11 +13,14 @@ import java.util.concurrent.ScheduledExecutorService
 
 private const val OCPP_SESSION_ATTRIBUTE = "ocppSession"
 
+/**
+ * Die Konfiguration startet bei jeder neuen Verbindung, nicht erst nach BootNotification: ein Charger, der nach einem
+ * Netzwerkabbruch nur wieder verbindet, sendet keine neue BootNotification.
+ */
 @Component
 class OcppWebSocketHandler(
     private val sessions: OcppSessionRegistry,
     private val router: OcppInboundRouter,
-    private val tracker: ChargerStateTracker,
     private val bootstrapper: ChargerBootstrapper,
     private val settings: AppProperties,
 ) : TextWebSocketHandler() {
@@ -30,13 +33,13 @@ class OcppWebSocketHandler(
         webSocket.attributes[OCPP_SESSION_ATTRIBUTE] = ocppSession
         sessions.register(ocppSession)?.closeReplaced()
         logger.info("Charger {} verbunden", chargePointId)
+        bootstrapper.bootstrapOnceAsync(chargePointId)
     }
 
     override fun afterConnectionClosed(webSocket: WebSocketSession, status: CloseStatus) {
         val ocppSession = ocppSessionOf(webSocket) ?: return
         if (sessions.unregister(ocppSession)) {
             ocppSession.dispatcher.cancelAll()
-            tracker.onDisconnected(ocppSession.chargePointId)
             logger.info("Charger {} getrennt: {}", ocppSession.chargePointId, status)
         }
     }
@@ -70,7 +73,7 @@ class OcppWebSocketHandler(
         val reply = router.route(ocppSession.chargePointId, call)
         ocppSession.sendFrame(reply)
         if (isAcceptedBootNotification(call, reply)) {
-            bootstrapper.bootstrapAsync(ocppSession.chargePointId)
+            bootstrapper.bootstrapOnceAsync(ocppSession.chargePointId)
         }
     }
 

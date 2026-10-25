@@ -17,18 +17,21 @@ import org.junit.jupiter.api.Test
 import java.util.concurrent.CompletableFuture
 
 private const val CHARGER_ID = "EHDFQLBX"
+private const val BASE_STACK_LEVEL = 0
+private const val LIMIT_STACK_LEVEL = 1
 
 @Epic("OCPP")
 @Feature("ChargingProfileService")
 class ChargingProfileServiceTest {
     private val registry = OcppSessionRegistry()
+    private val clock = MutableTestClock()
     private val session: OcppChargerSession = mockk(relaxed = true)
     private lateinit var service: ChargingProfileService
 
     @BeforeEach
     fun createService() {
         every { session.chargePointId } returns CHARGER_ID
-        service = ChargingProfileService(registry, AppProperties())
+        service = ChargingProfileService(registry, AppProperties(), clock)
     }
 
     @Test
@@ -42,8 +45,52 @@ class ChargingProfileServiceTest {
         assertTrue(result.success)
         assertEquals(16, service.desiredCurrentFor(CHARGER_ID))
         val profiles = capturedProfiles()
-        assertEquals(listOf(0, 1), profiles.map { it.csChargingProfiles.stackLevel })
+        assertEquals(listOf(BASE_STACK_LEVEL, LIMIT_STACK_LEVEL), profiles.map { it.csChargingProfiles.stackLevel })
         assertEquals(16.0, profiles[1].csChargingProfiles.chargingSchedule.chargingSchedulePeriod.single().limit)
+    }
+
+    @Test
+    @Story("Basisprofil pro Sitzung")
+    fun baseProfileIsSentOnlyOncePerSession() {
+        registry.register(session)
+        answerEverythingWith(OcppResponse.Result(acceptedPayload()))
+        service.applyLimit(CHARGER_ID, 16)
+
+        service.applyLimit(CHARGER_ID, 10)
+
+        verify(exactly = 3) { session.call(OcppActions.SET_CHARGING_PROFILE, any()) }
+        verify(exactly = 1) { session.call(OcppActions.SET_CHARGING_PROFILE, match<SetChargingProfileRequest> { it.csChargingProfiles.stackLevel == BASE_STACK_LEVEL }) }
+    }
+
+    @Test
+    @Story("Basisprofil pro Sitzung")
+    fun newSessionOfSameChargerReceivesBaseProfileAgain() {
+        registry.register(session)
+        answerEverythingWith(OcppResponse.Result(acceptedPayload()))
+        service.applyLimit(CHARGER_ID, 16)
+        val reconnected: OcppChargerSession = mockk(relaxed = true)
+        every { reconnected.chargePointId } returns CHARGER_ID
+        every { reconnected.call(any(), any()) } returns CompletableFuture.completedFuture(OcppResponse.Result(acceptedPayload()))
+        registry.register(reconnected)
+
+        service.applyLimit(CHARGER_ID, 10)
+
+        verify(exactly = 2) { reconnected.call(OcppActions.SET_CHARGING_PROFILE, any()) }
+    }
+
+    @Test
+    @Story("Basisprofil pro Sitzung")
+    fun rejectedBaseProfileIsRetriedOnNextLimit() {
+        registry.register(session)
+        every { session.call(OcppActions.SET_CHARGING_PROFILE, any()) } returns
+            CompletableFuture.completedFuture(OcppResponse.Result(rejectedPayload()))
+        service.applyLimit(CHARGER_ID, 16)
+        answerEverythingWith(OcppResponse.Result(acceptedPayload()))
+
+        val result = service.applyLimit(CHARGER_ID, 16)
+
+        assertTrue(result.success)
+        verify(exactly = 2) { session.call(OcppActions.SET_CHARGING_PROFILE, match<SetChargingProfileRequest> { it.csChargingProfiles.stackLevel == BASE_STACK_LEVEL }) }
     }
 
     @Test
@@ -63,9 +110,9 @@ class ChargingProfileServiceTest {
     @Story("Limit setzen")
     fun rejectedLimitProfileFailsTheActuation() {
         registry.register(session)
-        every { session.call(OcppActions.SET_CHARGING_PROFILE, match<SetChargingProfileRequest> { it.csChargingProfiles.stackLevel == 0 }) } returns
+        every { session.call(OcppActions.SET_CHARGING_PROFILE, match<SetChargingProfileRequest> { it.csChargingProfiles.stackLevel == BASE_STACK_LEVEL }) } returns
             CompletableFuture.completedFuture(OcppResponse.Result(acceptedPayload()))
-        every { session.call(OcppActions.SET_CHARGING_PROFILE, match<SetChargingProfileRequest> { it.csChargingProfiles.stackLevel == 1 }) } returns
+        every { session.call(OcppActions.SET_CHARGING_PROFILE, match<SetChargingProfileRequest> { it.csChargingProfiles.stackLevel == LIMIT_STACK_LEVEL }) } returns
             CompletableFuture.completedFuture(OcppResponse.Error("NotSupported", "nein"))
 
         val result = service.applyLimit(CHARGER_ID, 10)

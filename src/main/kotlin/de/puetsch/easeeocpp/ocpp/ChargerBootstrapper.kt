@@ -9,6 +9,7 @@ import de.puetsch.easeeocpp.ocpp.messages.TriggerMessageRequest
 import jakarta.annotation.PreDestroy
 import org.slf4j.LoggerFactory
 import org.springframework.stereotype.Component
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 
@@ -16,7 +17,11 @@ private const val METER_VALUES_SAMPLED_DATA_VALUE =
     "Power.Active.Import,Current.Import,Voltage,Current.Offered,Energy.Active.Import.Register"
 private const val FREE_CHARGING_ENABLED = "true"
 
-/** Konfiguriert den Charger nach BootNotification: Messwerte, kostenloses Laden ohne Autorisierung, dann Messwert-Trigger. */
+/**
+ * Konfiguriert den Charger nach einer neuen Verbindung: Messwerte, Telemetrie-Trigger, dann das Regelprofil.
+ * Kostenloses Laden (ohne Autorisierung) setzt der Bootstrapper nur, wenn die Steuerung wirklich schaltet;
+ * im Schattenmodus bleibt der Charger unverändert.
+ */
 @Component
 class ChargerBootstrapper(
     private val sessions: OcppSessionRegistry,
@@ -25,17 +30,24 @@ class ChargerBootstrapper(
 ) {
     private val logger = LoggerFactory.getLogger(javaClass)
     private val executor: ExecutorService = Executors.newCachedThreadPool()
+    private val bootstrappedSessionByChargerId = ConcurrentHashMap<ChargerId, OcppChargerSession>()
 
-    fun bootstrapAsync(chargerId: ChargerId) {
+    /** Startet die Konfigurationsfolge höchstens einmal pro Sitzung. Liefert false, wenn sie für diese Sitzung schon gestartet wurde. */
+    @Synchronized
+    fun bootstrapOnceAsync(chargerId: ChargerId): Boolean {
+        val session = sessions.find(chargerId) ?: return false
+        if (bootstrappedSessionByChargerId[chargerId] === session) return false
+        bootstrappedSessionByChargerId[chargerId] = session
         executor.execute { bootstrap(chargerId) }
+        return true
     }
 
     fun bootstrap(chargerId: ChargerId) {
         val session = sessions.find(chargerId) ?: return
         logger.info("Bootstrap von {} gestartet", chargerId)
         configurationChanges().forEach { change -> applyConfigurationChange(chargerId, session, change) }
-        requestMeterValues(chargerId, session)
-        profiles.resendDesiredLimit(chargerId)?.let { result -> logIfFailed(chargerId, "Limit nach Boot", result.message, result.success) }
+        requestTelemetryMessages(chargerId, session)
+        resendDesiredLimit(chargerId)
     }
 
     @PreDestroy
@@ -43,7 +55,10 @@ class ChargerBootstrapper(
         executor.shutdownNow()
     }
 
-    private fun configurationChanges(): List<ChangeConfigurationRequest> = listOf(
+    private fun configurationChanges(): List<ChangeConfigurationRequest> =
+        telemetryConfigurationChanges() + freeChargingConfigurationChanges()
+
+    private fun telemetryConfigurationChanges(): List<ChangeConfigurationRequest> = listOf(
         ChangeConfigurationRequest(
             OcppConfigurationKeys.METER_VALUES_SAMPLED_DATA,
             METER_VALUES_SAMPLED_DATA_VALUE,
@@ -52,21 +67,41 @@ class ChargerBootstrapper(
             OcppConfigurationKeys.METER_VALUE_SAMPLE_INTERVAL,
             settings.ocpp.meterValueSampleInterval.seconds.toString(),
         ),
-        ChangeConfigurationRequest(OcppConfigurationKeys.FREE_CHARGING, FREE_CHARGING_ENABLED),
-        ChangeConfigurationRequest(OcppConfigurationKeys.FREE_CHARGING_ID_TAG, settings.ocpp.freeChargingIdTag),
     )
+
+    private fun freeChargingConfigurationChanges(): List<ChangeConfigurationRequest> {
+        if (!settings.control.actuationEnabled) {
+            logger.info("Schattenmodus: FreeCharging wird nicht gesetzt")
+            return emptyList()
+        }
+        return listOf(
+            ChangeConfigurationRequest(OcppConfigurationKeys.FREE_CHARGING, FREE_CHARGING_ENABLED),
+            ChangeConfigurationRequest(OcppConfigurationKeys.FREE_CHARGING_ID_TAG, settings.ocpp.freeChargingIdTag),
+        )
+    }
 
     private fun applyConfigurationChange(chargerId: ChargerId, session: OcppChargerSession, change: ChangeConfigurationRequest) {
         val response = session.call(OcppActions.CHANGE_CONFIGURATION, change).join()
         logIfFailed(chargerId, "ChangeConfiguration ${change.key}", response.describe(), response.isAccepted())
     }
 
-    private fun requestMeterValues(chargerId: ChargerId, session: OcppChargerSession) {
-        val response = session.call(
-            OcppActions.TRIGGER_MESSAGE,
-            TriggerMessageRequest(requestedMessage = OcppRequestedMessages.METER_VALUES),
-        ).join()
-        logIfFailed(chargerId, "TriggerMessage MeterValues", response.describe(), response.isAccepted())
+    private fun requestTelemetryMessages(chargerId: ChargerId, session: OcppChargerSession) {
+        triggerMessage(
+            chargerId,
+            session,
+            TriggerMessageRequest(OcppRequestedMessages.STATUS_NOTIFICATION, connectorId = CONNECTOR_ID_VEHICLE),
+        )
+        triggerMessage(chargerId, session, TriggerMessageRequest(OcppRequestedMessages.METER_VALUES))
+    }
+
+    private fun triggerMessage(chargerId: ChargerId, session: OcppChargerSession, request: TriggerMessageRequest) {
+        val response = session.call(OcppActions.TRIGGER_MESSAGE, request).join()
+        logIfFailed(chargerId, "TriggerMessage ${request.requestedMessage}", response.describe(), response.isAccepted())
+    }
+
+    private fun resendDesiredLimit(chargerId: ChargerId) {
+        val result = profiles.resendDesiredLimit(chargerId) ?: return
+        logIfFailed(chargerId, "Limit nach Boot", result.message, result.success)
     }
 
     private fun logIfFailed(chargerId: ChargerId, step: String, detail: String, success: Boolean) {

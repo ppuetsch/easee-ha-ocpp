@@ -63,6 +63,7 @@ data class OcppProperties(
     val port: Int = 8443,
     val path: String = "/ocpp",
     val basicAuthPassword: String = "",
+    val allowAnonymous: Boolean = false,
     val meterValueSampleInterval: Duration = Duration.ofSeconds(5),
     val heartbeatInterval: Duration = Duration.ofSeconds(300),
     val profileDuration: Duration = Duration.ofSeconds(300),

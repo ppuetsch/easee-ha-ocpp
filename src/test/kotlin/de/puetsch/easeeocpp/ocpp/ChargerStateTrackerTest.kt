@@ -111,23 +111,36 @@ class ChargerStateTrackerTest {
 
     @Test
     @Story("Trennung")
-    fun disconnectClearsMeterValuesAndSetsUnavailable() {
-        connect(CHARGER_ID)
+    fun disconnectKeepsLastStatusAndReadingsButPowerIsZero() {
+        val session = connect(CHARGER_ID)
         tracker.onStatusChanged(CHARGER_ID, ChargerStatus.CHARGING)
         tracker.onMeterValues(CHARGER_ID, meterValuesWithPowerKilowatt("3.5"))
 
-        tracker.onDisconnected(CHARGER_ID)
+        sessions.unregister(session)
 
         val snapshot = tracker.snapshot(CHARGER_ID)
-        assertEquals(ChargerStatus.UNAVAILABLE, snapshot.status)
+        assertFalse(snapshot.connected)
+        assertEquals(ChargerStatus.CHARGING, snapshot.status)
         assertEquals(0.0, snapshot.power)
-        assertEquals(null, snapshot.lastMeterValueAt)
+        assertEquals(TEST_START_INSTANT, snapshot.lastMeterValueAt)
     }
 
-    private fun connect(chargerId: String) {
+    @Test
+    @Story("Trennung")
+    fun reconnectRestoresPowerFromFreshReading() {
+        val session = connect(CHARGER_ID)
+        tracker.onMeterValues(CHARGER_ID, meterValuesWithPowerKilowatt("3.5"))
+        sessions.unregister(session)
+        connect(CHARGER_ID)
+
+        assertEquals(3500.0, tracker.snapshot(CHARGER_ID).power)
+    }
+
+    private fun connect(chargerId: String): OcppChargerSession {
         val session = mockk<OcppChargerSession>(relaxed = true)
         every { session.chargePointId } returns chargerId
         sessions.register(session)
+        return session
     }
 
     private fun meterValuesWithPowerKilowatt(kilowatt: String): List<MeterValue> = listOf(

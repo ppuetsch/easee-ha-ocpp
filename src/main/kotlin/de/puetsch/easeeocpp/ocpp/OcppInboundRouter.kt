@@ -2,6 +2,7 @@ package de.puetsch.easeeocpp.ocpp
 
 import de.puetsch.easeeocpp.config.AppProperties
 import de.puetsch.easeeocpp.domain.model.ChargerId
+import de.puetsch.easeeocpp.domain.model.ChargerStatus
 import de.puetsch.easeeocpp.ocpp.messages.AuthorizeRequest
 import de.puetsch.easeeocpp.ocpp.messages.AuthorizeResponse
 import de.puetsch.easeeocpp.ocpp.messages.BootNotificationRequest
@@ -21,7 +22,11 @@ import tools.jackson.databind.JsonNode
 import java.time.Clock
 import java.util.concurrent.atomic.AtomicInteger
 
-private const val FIRST_TRANSACTION_ID = 1
+/**
+ * OCPP-Transaktionsnummern sind positive 32-Bit-Ganzzahlen. Der Zähler startet aus der Zeit,
+ * damit er nach einem Neustart nicht wieder bei 1 beginnt.
+ */
+private const val MAX_TRANSACTION_ID = Int.MAX_VALUE
 
 /** Beantwortet eingehende CALLs des Chargers. Zustandsänderungen landen im [ChargerStateTracker]. */
 @Component
@@ -31,7 +36,7 @@ class OcppInboundRouter(
     private val settings: AppProperties,
 ) {
     private val logger = LoggerFactory.getLogger(javaClass)
-    private val nextTransactionId = AtomicInteger(FIRST_TRANSACTION_ID)
+    private val nextTransactionId = AtomicInteger(transactionIdSeed())
     private val handlersByAction: Map<String, (ChargerId, JsonNode) -> JsonNode> = mapOf(
         OcppActions.BOOT_NOTIFICATION to ::handleBootNotification,
         OcppActions.HEARTBEAT to { _, _ -> toNode(HeartbeatResponse(currentTimestamp())) },
@@ -72,14 +77,29 @@ class OcppInboundRouter(
 
     private fun handleStatusNotification(chargePointId: ChargerId, payload: JsonNode): JsonNode {
         val request = decode<StatusNotificationRequest>(payload)
-        val status = ChargerStatusMapping.fromOcpp(request.status)
+        val status = statusOf(request)
+        if (isVehicleConnector(request.connectorId)) {
+            tracker.onStatusChanged(chargePointId, status)
+        } else {
+            logger.debug("StatusNotification {} von Connector {} ignoriert", status, request.connectorId)
+        }
+        return emptyPayload()
+    }
+
+    private fun statusOf(request: StatusNotificationRequest): ChargerStatus =
+        ChargerStatusMapping.fromOcpp(request.status)
             ?: throw OcppProtocolViolationException(
                 OcppErrorCode.PROPERTY_CONSTRAINT_VIOLATION,
                 "unbekannter Status ${request.status}",
             )
-        tracker.onStatusChanged(chargePointId, status)
-        return emptyPayload()
-    }
+
+    /**
+     * Connector 0 meldet den Zustand des Ladepunkts. Der Fahrzeugstatus kommt von Connector 1
+     * und darf davon nicht überschrieben werden.
+     */
+    private fun isVehicleConnector(connectorId: Int): Boolean = connectorId != CONNECTOR_ID_CHARGE_POINT
+
+    private fun transactionIdSeed(): Int = (clock.instant().epochSecond % MAX_TRANSACTION_ID).toInt()
 
     private fun handleMeterValues(chargePointId: ChargerId, payload: JsonNode): JsonNode {
         val request = decode<MeterValuesRequest>(payload)
