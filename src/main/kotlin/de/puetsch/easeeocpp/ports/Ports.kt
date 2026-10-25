@@ -19,6 +19,9 @@ interface HomeAssistantStates {
 interface ChargerFleet {
     fun snapshots(): List<ChargerSnapshot>
     fun applyLimit(chargerId: ChargerId, current: Ampere): ActuationResult
+
+    /** Fordert frische Messwerte an (nicht blockierend), damit die Ladeleistung zur Netzmessung passt. */
+    fun requestFreshMeasurements() = Unit
 }
 
 interface PhaseModeGateway {
