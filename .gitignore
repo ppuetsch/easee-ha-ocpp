@@ -38,3 +38,6 @@ allure-results/
 allure-report/
 data/
 .claude/
+homeassistant/backup/*.json
+__pycache__/
+.mypy_cache/
