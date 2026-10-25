@@ -20,6 +20,7 @@ data class ControlState(
     val history: List<ControlAction>,
     val settleUntil: Instant?,
     val lastHeartbeatAt: Instant?,
+    val lastError: String? = null,
 )
 
 interface ControlStateStore {

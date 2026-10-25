@@ -1,0 +1,182 @@
+package de.puetsch.easeeocpp.control
+
+import de.puetsch.easeeocpp.config.AppProperties
+import de.puetsch.easeeocpp.domain.model.ChargerLimit
+import de.puetsch.easeeocpp.domain.model.ControlAction
+import de.puetsch.easeeocpp.domain.model.ControlDecision
+import de.puetsch.easeeocpp.domain.model.ChargerSnapshot
+import de.puetsch.easeeocpp.domain.model.PhaseMode
+import de.puetsch.easeeocpp.ports.ActuationResult
+import de.puetsch.easeeocpp.ports.ChargerFleet
+import de.puetsch.easeeocpp.ports.HomeAssistantStates
+import de.puetsch.easeeocpp.ports.PhaseModeGateway
+import org.slf4j.LoggerFactory
+import org.springframework.context.SmartLifecycle
+import org.springframework.stereotype.Component
+import java.time.Clock
+import java.time.Instant
+import java.util.concurrent.Executors
+import java.util.concurrent.ScheduledExecutorService
+import java.util.concurrent.TimeUnit
+
+const val KIND_PHASE_MODE = "PHASE_MODE"
+const val KIND_CURRENT_LIMIT = "CURRENT_LIMIT"
+const val KIND_CURRENT_REFRESH = "CURRENT_REFRESH"
+const val OUTCOME_SHADOW = "Schattenmodus – nicht gesendet"
+const val OUTCOME_SENT = "gesendet"
+const val SKIP_HA_DISCONNECTED = "HA nicht verbunden"
+const val SKIP_MISSING_INPUT_PREFIX = "Eingang fehlt: "
+
+private const val OUTCOME_FAILED_PREFIX = "fehlgeschlagen: "
+private const val CONTROL_THREAD_NAME = "control-loop"
+private const val ERROR_PREFIX = "Regelzyklus fehlgeschlagen: "
+
+/**
+ * Dünner Trigger plus Zyklus: [runCycle] liest die Eingänge, rechnet und stellt nur bei echten Änderungen
+ * (oder nach Ablauf des Profil-Refreshs) um. Während der Settle-Pause wird gerechnet, aber nichts gesendet.
+ * Im Schattenmodus wird der Zustand nachgeführt, aber kein Gerät angesprochen.
+ */
+@Component
+class ControlLoop(
+    private val settingsReader: HaSettingsReader,
+    private val haStates: HomeAssistantStates,
+    private val chargerFleet: ChargerFleet,
+    private val phaseModeGateway: PhaseModeGateway,
+    private val cycle: ControlCycle,
+    private val history: ControlHistory,
+    private val stateHolder: ControlStateHolder,
+    private val properties: AppProperties,
+    private val clock: Clock,
+) : SmartLifecycle {
+    private val log = LoggerFactory.getLogger(ControlLoop::class.java)
+    private val tracker = ActuationTracker(properties.control.settleDelay)
+    private var scheduler: ScheduledExecutorService? = null
+
+    @Volatile
+    private var running = false
+
+    fun runCycle() {
+        val now = clock.instant()
+        try {
+            executeCycle(now)
+            stateHolder.update { it.copy(lastError = null) }
+        } catch (failure: Exception) {
+            log.warn("Regelzyklus fehlgeschlagen: {}", failure.message, failure)
+            stateHolder.update { it.copy(evaluatedAt = now, lastError = ERROR_PREFIX + failure.message) }
+        }
+    }
+
+    private fun executeCycle(now: Instant) {
+        val haConnected = haStates.isConnected()
+        val snapshots = chargerFleet.snapshots()
+        when {
+            !haConnected -> publishSkipped(now, haConnected, snapshots, SKIP_HA_DISCONNECTED)
+            else -> when (val reading = settingsReader.read()) {
+                is HaReadResult.MissingInput ->
+                    publishSkipped(now, haConnected, snapshots, SKIP_MISSING_INPUT_PREFIX + reading.entityId)
+
+                is HaReadResult.Complete -> evaluateAndActuate(now, reading.readings, snapshots)
+            }
+        }
+    }
+
+    private fun evaluateAndActuate(now: Instant, readings: HaReadings, snapshots: List<ChargerSnapshot>) {
+        val evaluation = cycle.evaluate(readings, snapshots, now)
+        val actions = if (tracker.isSettling(now)) emptyList() else actuate(now, evaluation.decision)
+        actions.forEach(history::record)
+        stateHolder.update { previous ->
+            previous.copy(
+                evaluatedAt = now,
+                haConnected = true,
+                actuationEnabled = properties.control.actuationEnabled,
+                inputs = evaluation.inputs,
+                settings = readings.settings,
+                chargers = snapshots,
+                decision = evaluation.decision,
+                skippedReason = null,
+                lastAction = actions.lastOrNull() ?: previous.lastAction,
+                history = history.recent(),
+                settleUntil = tracker.settleUntil(now),
+            )
+        }
+    }
+
+    private fun publishSkipped(now: Instant, haConnected: Boolean, snapshots: List<ChargerSnapshot>, reason: String) {
+        stateHolder.update { previous ->
+            previous.copy(
+                evaluatedAt = now,
+                haConnected = haConnected,
+                actuationEnabled = properties.control.actuationEnabled,
+                inputs = null,
+                settings = null,
+                chargers = snapshots,
+                decision = null,
+                skippedReason = reason,
+                history = history.recent(),
+                settleUntil = tracker.settleUntil(now),
+            )
+        }
+    }
+
+    private fun actuate(now: Instant, decision: ControlDecision): List<ControlAction> {
+        val phaseActions = phaseModeActionsIfChanged(now, decision.phaseMode)
+        val limits = decision.allocation.limits
+        val limitsChanged = tracker.limitsChanged(limits)
+        val limitActions = limitActionsIfDue(now, limits, limitsChanged)
+        if (phaseActions.isNotEmpty() || limitsChanged) tracker.startSettle(now)
+        return phaseActions + limitActions
+    }
+
+    private fun phaseModeActionsIfChanged(now: Instant, phaseMode: PhaseMode): List<ControlAction> {
+        if (!tracker.phaseModeChanged(phaseMode)) return emptyList()
+        val results = properties.chargers.map { charger ->
+            charger.id to actuateOrSimulate { phaseModeGateway.setPhaseMode(charger.id, phaseMode) }
+        }
+        if (results.all { it.second.success }) tracker.recordPhaseMode(phaseMode)
+        return results.map { (chargerId, result) ->
+            ControlAction(now, chargerId, KIND_PHASE_MODE, phaseMode, null, outcomeOf(result))
+        }
+    }
+
+    private fun limitActionsIfDue(now: Instant, limits: List<ChargerLimit>, limitsChanged: Boolean): List<ControlAction> {
+        val refreshDue = tracker.refreshDue(now, properties.control.profileRefreshInterval)
+        if (!limitsChanged && !refreshDue) return emptyList()
+        val kind = if (limitsChanged) KIND_CURRENT_LIMIT else KIND_CURRENT_REFRESH
+        tracker.recordLimitAttempt(now)
+        return limits.map { limit ->
+            val result = actuateOrSimulate { chargerFleet.applyLimit(limit.chargerId, limit.current) }
+            if (result.success) tracker.recordLimit(limit.chargerId, limit.current)
+            ControlAction(now, limit.chargerId, kind, null, limit.current, outcomeOf(result))
+        }
+    }
+
+    private fun actuateOrSimulate(call: () -> ActuationResult): ActuationResult =
+        if (properties.control.actuationEnabled) call() else ActuationResult(success = true, message = OUTCOME_SHADOW)
+
+    private fun outcomeOf(result: ActuationResult): String = when {
+        !properties.control.actuationEnabled -> OUTCOME_SHADOW
+        result.success -> OUTCOME_SENT
+        else -> OUTCOME_FAILED_PREFIX + result.message
+    }
+
+    @Synchronized
+    override fun start() {
+        if (running) return
+        running = true
+        val interval = properties.control.interval.toMillis()
+        scheduler = Executors.newSingleThreadScheduledExecutor { runnable ->
+            Thread(runnable, CONTROL_THREAD_NAME).apply { isDaemon = true }
+        }.also { executor ->
+            executor.scheduleWithFixedDelay(::runCycle, 0, interval, TimeUnit.MILLISECONDS)
+        }
+    }
+
+    @Synchronized
+    override fun stop() {
+        running = false
+        scheduler?.shutdownNow()
+        scheduler = null
+    }
+
+    override fun isRunning(): Boolean = running
+}
