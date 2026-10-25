@@ -31,14 +31,14 @@ private const val TEXT_VERTEILUNG_GETEILT = "Geteilt"
 private const val TEXT_VERTEILUNG_EIN_AUTO = "Ein Auto"
 
 @Component
-class StateViewFactory(private val clock: Clock) {
+class StateViewFactory(private val clock: Clock, private val chargerNames: ChargerNames) {
 
     fun create(state: ControlState): StateView {
         val now: Instant = clock.instant()
         return StateView(
             schattenmodus = !state.actuationEnabled,
             auswertungZeit = formatClockWithAge(state.evaluatedAt, now),
-            uebersprungenGrund = formatOrFallback(state.skippedReason),
+            uebersprungenGrund = withNames(state.skippedReason),
             verbindungen = connectionsView(state, now),
             eingaenge = inputsView(state.inputs, state.settings),
             ergebnis = resultView(state.decision, state.skippedReason),
@@ -59,6 +59,7 @@ class StateViewFactory(private val clock: Clock) {
     private fun chargerView(charger: ChargerSnapshot, now: Instant): ChargerView =
         ChargerView(
             id = charger.chargerId,
+            name = chargerNames.nameOf(charger.chargerId),
             verbindung = if (charger.connected) TEXT_VERBUNDEN else TEXT_GETRENNT,
             verbindungKlasse = if (charger.connected) CSS_OK else CSS_WARNUNG,
             status = chargerStatusLabel(charger.status),
@@ -79,7 +80,7 @@ class StateViewFactory(private val clock: Clock) {
             istPhasen = formatPhaseMode(inputs?.phaseMode),
             ueberschuss = if (settings?.surplusChargeEnabled == true) TEXT_JA else TEXT_NEIN,
             batteriePraeferenz = batteriePraeferenzText(inputs),
-            prioCharger = formatOrFallback(settings?.priorityCharger),
+            prioCharger = withNames(settings?.priorityCharger),
         )
 
     private fun batteriePraeferenzText(inputs: SurplusInputs?): String = when (inputs?.preferCarOverBattery) {
@@ -96,9 +97,9 @@ class StateViewFactory(private val clock: Clock) {
             zielleistung = formatWatt(surplus?.targetPower),
             zielstrom = formatAmpere(surplus?.targetCurrent),
             verteilungsmodus = verteilungsmodusText(decision?.allocationMode),
-            verteilung = decision?.allocation?.limits.orEmpty().map { VerteilungView(it.chargerId, formatAmpere(it.current)) },
+            verteilung = decision?.allocation?.limits.orEmpty().map { VerteilungView(it.chargerId, chargerNames.nameOf(it.chargerId), formatAmpere(it.current)) },
             phaseHoechsteSpannung = formatPhaseLabel(decision?.phaseWithHighestVoltage),
-            begruendung = formatOrFallback(decision?.reason ?: skippedReason),
+            begruendung = withNames(decision?.reason ?: skippedReason),
         )
     }
 
@@ -112,22 +113,24 @@ class StateViewFactory(private val clock: Clock) {
     private fun lastActionView(action: ControlAction?, now: Instant): LastActionView =
         LastActionView(
             zeit = formatClockWithAge(action?.at, now),
-            charger = formatOrFallback(action?.chargerId),
+            charger = withNames(action?.chargerId),
             aktion = formatOrFallback(action?.kind),
             phasen = formatPhaseMode(action?.phaseMode),
             strom = formatAmpere(action?.current),
-            ergebnis = formatOrFallback(action?.outcome),
+            ergebnis = withNames(action?.outcome),
         )
 
     private fun historyRowView(action: ControlAction, now: Instant): HistoryRowView =
         HistoryRowView(
             zeit = formatClockWithAge(action.at, now),
-            charger = formatOrFallback(action.chargerId),
+            charger = withNames(action.chargerId),
             aktion = formatOrFallback(action.kind),
             phasen = formatPhaseMode(action.phaseMode),
             strom = formatAmpere(action.current),
-            ergebnis = formatOrFallback(action.outcome),
+            ergebnis = withNames(action.outcome),
         )
+
+    private fun withNames(text: String?): String = formatOrFallback(text?.let(chargerNames::replaceSerialsIn))
 
     private fun chargerStatusLabel(status: ChargerStatus): String = when (status) {
         ChargerStatus.AVAILABLE -> "Bereit"

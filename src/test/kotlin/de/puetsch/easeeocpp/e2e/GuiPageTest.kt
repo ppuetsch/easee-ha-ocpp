@@ -38,7 +38,10 @@ class GuiPageTest : AbstractGuiTest() {
             assertShownValue("eingang-zielphasen", "3-phasig")
             assertShownValue("eingang-ueberschuss", "an")
             assertShownValue("eingang-batterie-praeferenz", "Auto vor Batterie")
-            assertShownValue("eingang-prio-charger", StateFixtures.PRIO_CHARGER)
+            assertShownValue("eingang-prio-charger", "Mülltonnen")
+        }
+        schritt("Versionsnummer") {
+            assertThat(page.locator("[data-testid='version']")).hasText(Pattern.compile("[^ ]+"))
         }
         schritt("Berechnungsergebnis") {
             assertShownValue("ergebnis-mindest-pv", "1.740 W")

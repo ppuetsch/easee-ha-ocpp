@@ -26,7 +26,7 @@ import java.time.ZoneOffset
 @Epic("GUI")
 @Feature("Controller")
 @WebMvcTest(controllers = [StateController::class, StateApiController::class])
-@Import(StateViewFactory::class)
+@Import(StateViewFactory::class, ChargerNames::class, VersionProvider::class, VersionModelAdvice::class)
 @EnableConfigurationProperties(AppProperties::class)
 class StateControllerTest {
 

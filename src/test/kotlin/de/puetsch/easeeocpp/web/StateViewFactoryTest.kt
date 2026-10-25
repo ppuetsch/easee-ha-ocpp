@@ -1,5 +1,6 @@
 package de.puetsch.easeeocpp.web
 
+import de.puetsch.easeeocpp.config.AppProperties
 import io.qameta.allure.Epic
 import io.qameta.allure.Feature
 import io.qameta.allure.Story
@@ -15,7 +16,7 @@ import java.time.ZoneOffset
 @Feature("View-Modell")
 class StateViewFactoryTest {
     private val now: Instant = Instant.parse("2026-10-25T12:00:00Z")
-    private val factory = StateViewFactory(Clock.fixed(now, ZoneOffset.UTC))
+    private val factory = StateViewFactory(Clock.fixed(now, ZoneOffset.UTC), ChargerNames(AppProperties()))
 
     @Test
     @Story("vollständiger Zustand")
@@ -38,7 +39,14 @@ class StateViewFactoryTest {
     fun `verteilung und chargerstatus werden je Charger aufgefuehrt`() {
         val view = factory.create(StateFixtures.fullState(now))
 
-        assertEquals(listOf(VerteilungView(StateFixtures.PRIO_CHARGER, "6 A"), VerteilungView(StateFixtures.SECOND_CHARGER, "0 A")), view.ergebnis.verteilung)
+        val names = ChargerNames(AppProperties())
+        assertEquals(
+            listOf(
+                VerteilungView(StateFixtures.PRIO_CHARGER, names.nameOf(StateFixtures.PRIO_CHARGER), "6 A"),
+                VerteilungView(StateFixtures.SECOND_CHARGER, names.nameOf(StateFixtures.SECOND_CHARGER), "0 A"),
+            ),
+            view.ergebnis.verteilung,
+        )
         assertEquals("Lädt", view.verbindungen.chargers.first().status)
         assertEquals("getrennt", view.verbindungen.chargers.last().verbindung)
         assertEquals(FALLBACK_TEXT, view.verbindungen.chargers.last().letzterMesswert)

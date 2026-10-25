@@ -10,12 +10,34 @@ group = "de.puetsch"
 version = "0.1.0"
 
 val allureVersion = "2.35.5"
+val unknownVersion = "unbekannt"
+val shortShaLength = 7
 val playwrightVersion = "1.64.0"
 
 kotlin {
     jvmToolchain(25)
     compilerOptions {
         freeCompilerArgs.add("-Xjsr305=strict")
+    }
+}
+
+// Im Docker-Build gibt es kein .git: die CI und das Deploy-Skript reichen den Short-SHA per -PgitSha herein.
+fun gitOutput(vararg arguments: String): String =
+    providers.exec {
+        commandLine("git", *arguments)
+        isIgnoreExitValue = true
+    }.standardOutput.asText.get().trim()
+
+val buildVersion: String = providers.gradleProperty("gitSha").orNull?.takeIf { it.isNotBlank() }
+    ?: gitOutput("rev-parse", "--short=$shortShaLength", "HEAD").takeIf { it.isNotBlank() }
+        ?.let { sha -> if (gitOutput("status", "--porcelain").isEmpty()) sha else "$sha-dirty" }
+    ?: unknownVersion
+
+springBoot {
+    buildInfo {
+        properties {
+            version = buildVersion
+        }
     }
 }
 

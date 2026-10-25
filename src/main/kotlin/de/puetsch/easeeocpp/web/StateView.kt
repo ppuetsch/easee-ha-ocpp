@@ -21,6 +21,7 @@ data class ConnectionsView(
 
 data class ChargerView(
     val id: String,
+    val name: String,
     val verbindung: String,
     val verbindungKlasse: String,
     val status: String,
@@ -54,7 +55,7 @@ data class ResultView(
     val begruendung: String,
 )
 
-data class VerteilungView(val chargerId: String, val strom: String)
+data class VerteilungView(val chargerId: String, val name: String, val strom: String)
 
 data class LastActionView(
     val zeit: String,

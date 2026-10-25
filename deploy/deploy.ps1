@@ -41,7 +41,8 @@ param(
     [switch] $DryRun,
     [switch] $Actuate,
     [switch] $Force,
-    [switch] $PlainOcpp
+    [switch] $PlainOcpp,
+    [string] $ExpectedVersion = ''
 )
 
 $ErrorActionPreference = 'Stop'
@@ -62,6 +63,11 @@ $DATA_VOLUME = 'easee-data'
 $REQUIRED_SECRET_NAMES = @('HA_TOKEN', 'EASEE_USERNAME', 'EASEE_PASSWORD', 'OCPP_BASIC_AUTH_PASSWORD', 'EASEE_OCPP_ALLOWEDIDTAGS')
 if (-not $PlainOcpp) { $REQUIRED_SECRET_NAMES += 'KEYSTORE_PASSWORD' }
 $PROJECT_ROOT = Split-Path -Parent $PSScriptRoot
+$SHORT_SHA_LENGTH = 7
+$VERSION_CHECK_TIMEOUT_SECONDS = 120
+$VERSION_CHECK_INTERVAL_SECONDS = 3
+$VERSION_CHECK_REQUEST_TIMEOUT_SECONDS = 5
+$DIRTY_SUFFIX = '-dirty'
 
 function Get-SshTarget {
     return "$SshUser@$DockerHost"
@@ -211,8 +217,24 @@ function Publish-Image {
     Invoke-Remote "docker pull $Image"
 }
 
+function Get-GitOutput([string[]] $GitArguments) {
+    return ((& git -C $PROJECT_ROOT @GitArguments) | Out-String).Trim()
+}
+
+function Get-LocalVersion {
+    $sha = Get-GitOutput @('rev-parse', "--short=$SHORT_SHA_LENGTH", 'HEAD')
+    if (-not $sha) { throw 'Git-Version nicht ermittelbar (kein Git-Repository?). -ExpectedVersion angeben.' }
+    if ($Local -and (Get-GitOutput @('status', '--porcelain'))) { return "$sha$DIRTY_SUFFIX" }
+    return $sha
+}
+
+function Resolve-ExpectedVersion {
+    if ($ExpectedVersion) { return $ExpectedVersion }
+    return Get-LocalVersion
+}
+
 function Publish-LocalImage {
-    Invoke-LocalDocker @('build', '-t', $Image, $PROJECT_ROOT)
+    Invoke-LocalDocker @('build', '--build-arg', "GIT_SHA=$script:VersionToDeploy", '-t', $Image, $PROJECT_ROOT)
     $target = Get-SshTarget
     if ($DryRun) {
         Write-DryRunCommand "docker save $Image | ssh $target docker load"
@@ -275,7 +297,41 @@ function Show-Logs {
     & "$PSScriptRoot\logs.ps1" -DockerHost $DockerHost -SshUser $SshUser -DryRun:$DryRun
 }
 
+function Get-ServiceJson([string] $Path) {
+    $url = "http://${DockerHost}:${HTTP_PORT}$Path"
+    $response = Invoke-WebRequest -Uri $url -UseBasicParsing -TimeoutSec $VERSION_CHECK_REQUEST_TIMEOUT_SECONDS
+    return @{ Status = [int]$response.StatusCode; Body = ($response.Content | ConvertFrom-Json) }
+}
+
+function Test-ServiceMatchesVersion([string] $Version) {
+    $versionResponse = Get-ServiceJson '/api/version'
+    if ($versionResponse.Status -ne 200) { return "HTTP $($versionResponse.Status) bei /api/version" }
+    if ($versionResponse.Body.version -ne $Version) { return "Version '$($versionResponse.Body.version)' statt '$Version'" }
+    $healthResponse = Get-ServiceJson '/actuator/health'
+    if ($healthResponse.Body.status -ne 'UP') { return "Health '$($healthResponse.Body.status)'" }
+    return ''
+}
+
+function Assert-ServiceRunsVersion([string] $Version) {
+    if ($DryRun) {
+        Write-DryRunCommand "Post-Deployment-Check: GET http://${DockerHost}:${HTTP_PORT}/api/version == $Version und /actuator/health == UP (max. $VERSION_CHECK_TIMEOUT_SECONDS s)"
+        return
+    }
+    $deadline = (Get-Date).AddSeconds($VERSION_CHECK_TIMEOUT_SECONDS)
+    $lastProblem = 'noch keine Antwort'
+    while ((Get-Date) -lt $deadline) {
+        try { $lastProblem = Test-ServiceMatchesVersion $Version } catch { $lastProblem = "nicht erreichbar: $($_.Exception.Message)" }
+        if (-not $lastProblem) {
+            Write-Host "Post-Deployment-Check OK: Version $Version laeuft und ist healthy."
+            return
+        }
+        Start-Sleep -Seconds $VERSION_CHECK_INTERVAL_SECONDS
+    }
+    throw "Post-Deployment-Check fehlgeschlagen nach $VERSION_CHECK_TIMEOUT_SECONDS s: $lastProblem"
+}
+
 function Invoke-Deployment {
+    $script:VersionToDeploy = Resolve-ExpectedVersion
     Assert-DeploymentPolicy
     if (-not $PlainOcpp) { Assert-KeystoreFilePresent }
     Stop-LegacyContainerIfRequested
@@ -284,6 +340,7 @@ function Invoke-Deployment {
     if (-not $PlainOcpp) { Send-KeystoreFile }
     Replace-Container
     Invoke-Remote "docker ps --filter 'name=^$CONTAINER_NAME`$' --format '{{.Status}}'"
+    Assert-ServiceRunsVersion $script:VersionToDeploy
     Show-Logs
 }
 

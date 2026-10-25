@@ -26,7 +26,7 @@
             </thead>
             <tbody>
             <tr th:each="charger : ${view.verbindungen.chargers}" th:attr="data-testid='charger-' + ${charger.id}">
-                <td th:text="${charger.id}">–</td>
+                <td th:text="${charger.name}">–</td>
                 <td><span class="pille" th:classappend="${charger.verbindungKlasse}" th:text="${charger.verbindung}">–</span></td>
                 <td data-testid="charger-status" th:text="${charger.status}">–</td>
                 <td data-testid="charger-auto-angesteckt" th:text="${charger.autoAngesteckt}">–</td>
@@ -68,7 +68,7 @@
             <dd data-testid="ergebnis-verteilung">
                 <ul class="liste">
                     <li th:each="eintrag : ${view.ergebnis.verteilung}" th:attr="data-charger=${eintrag.chargerId}">
-                        <span th:text="${eintrag.chargerId}">–</span>: <span th:text="${eintrag.strom}">–</span>
+                        <span th:text="${eintrag.name}">–</span>: <span th:text="${eintrag.strom}">–</span>
                     </li>
                 </ul>
             </dd>

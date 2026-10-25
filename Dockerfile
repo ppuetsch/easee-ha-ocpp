@@ -1,13 +1,14 @@
 # syntax=docker/dockerfile:1
 
 FROM eclipse-temurin:25-jdk AS build
+ARG GIT_SHA=
 WORKDIR /workspace
 COPY gradlew settings.gradle.kts build.gradle.kts ./
 COPY gradle ./gradle
 COPY src ./src
 RUN --mount=type=cache,target=/root/.gradle \
     chmod +x gradlew \
- && ./gradlew bootJar -x test --no-daemon --console=plain \
+ && ./gradlew bootJar -x test -PgitSha="${GIT_SHA}" --no-daemon --console=plain \
  && cp "$(ls build/libs/*.jar | grep -v -- '-plain.jar' | head -n 1)" /workspace/app.jar
 
 FROM eclipse-temurin:25-jre AS runtime

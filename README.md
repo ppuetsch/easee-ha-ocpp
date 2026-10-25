@@ -71,3 +71,6 @@ Die alten Zugangsdaten standen im Klartext in `easee/easee.py` und in dessen Git
 2. **HA-Token:** In Home Assistant unter Profil → Sicherheit → Langlebige Zugangstoken ein neues erstellen, das alte löschen, dann `[Environment]::SetEnvironmentVariable('HA_TOKEN','<neu>','User')` (das Token aus `easee.py` ist damit ebenfalls ungültig).
 3. **OCPP-Passwort** (max. 20 Zeichen) neu setzen: `[Environment]::SetEnvironmentVariable('OCPP_BASIC_AUTH_PASSWORD','<neu>','User')`, danach `deploy/activate-easee-ocpp.ps1` für beide Charger (`-SkipCircuitReset -Plain`) und `deploy/deploy.ps1 -Local -PlainOcpp -Actuate`.
 4. Nach jeder Änderung neu deployen: `deploy/deploy.ps1 -Local -PlainOcpp -Actuate` (schreibt die env-Datei neu).
+
+## Versionsnummer
+Die Version ist der Short-SHA (7 Zeichen) des Commits, aus dem gebaut wurde; bei lokalen, uncommitteten Änderungen mit Suffix `-dirty`. Sie steht im Fuß der GUI und unter `GET /api/version` (`{"version":"abc1234"}`). Gradle (`springBoot.buildInfo`) bekommt sie per `-PgitSha`, Docker per `--build-arg GIT_SHA`; die CI übergibt `GITHUB_SHA` gekürzt. `deploy.ps1` prüft nach dem Start (bis 120 s), dass `/api/version` mit HTTP 200 die erwartete Version liefert und `/actuator/health` `UP` ist; sonst bricht es mit Fehler ab (`-ExpectedVersion` überschreibt die erwartete Version).
