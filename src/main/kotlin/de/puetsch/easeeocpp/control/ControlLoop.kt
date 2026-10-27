@@ -1,7 +1,11 @@
 package de.puetsch.easeeocpp.control
 
 import de.puetsch.easeeocpp.config.AppProperties
+import de.puetsch.easeeocpp.domain.model.AllocationResult
+import de.puetsch.easeeocpp.domain.model.Ampere
+import de.puetsch.easeeocpp.domain.model.ChargerId
 import de.puetsch.easeeocpp.domain.model.ChargerLimit
+import de.puetsch.easeeocpp.domain.model.ChargerStatus
 import de.puetsch.easeeocpp.domain.model.ControlAction
 import de.puetsch.easeeocpp.domain.model.ControlDecision
 import de.puetsch.easeeocpp.domain.model.ChargerSnapshot
@@ -60,6 +64,7 @@ class ControlLoop(
 ) : SmartLifecycle {
     private val log = LoggerFactory.getLogger(ControlLoop::class.java)
     private val tracker = ActuationTracker(properties.control.settleDelay)
+    private val rampLimiter = RampLimiter(properties.control)
     private val phaseModeBackoff = PhaseModeRetryBackoff()
     private var scheduler: ScheduledExecutorService? = null
 
@@ -104,7 +109,15 @@ class ControlLoop(
 
     private fun evaluateAndActuate(now: Instant, readings: HaReadings, snapshots: List<ChargerSnapshot>) {
         val evaluation = cycle.evaluate(readings, snapshots, now, tracker.lastLimits())
-        val actions = if (tracker.isSettling(now)) emptyList() else actuate(now, evaluation.decision)
+        val rampedLimits = rampLimiter.limit(
+            now,
+            evaluation.decision.allocation.limits,
+            tracker.lastLimits(),
+            startingPoint = { chargerId -> measuredCurrent(chargerId, snapshots) },
+            reductionsOnly = tracker.isSettling(now),
+        )
+        val decision = withRampNote(evaluation.decision, rampedLimits)
+        val actions = actuate(now, decision.copy(allocation = AllocationResult(rampedLimits, rampedLimits.sumOf { it.current })), settling = tracker.isSettling(now))
         actions.forEach(history::record)
         stateHolder.update { previous ->
             previous.copy(
@@ -114,7 +127,7 @@ class ControlLoop(
                 inputs = evaluation.inputs,
                 settings = readings.settings,
                 chargers = snapshots,
-                decision = evaluation.decision,
+                decision = decision,
                 skippedReason = null,
                 lastAction = actions.lastOrNull() ?: previous.lastAction,
                 history = history.recent(),
@@ -144,13 +157,27 @@ class ControlLoop(
      * Ein fehlgeschlagener Phasenbefehl startet keine Settle-Pause und blockiert die Stromregelung nicht.
      * Der Settle-Delay folgt nur gelungenen Änderungen; Limit-Änderungen werden wie bisher mit Versuch gesetzt.
      */
-    private fun actuate(now: Instant, decision: ControlDecision): List<ControlAction> {
-        val phaseAttempt = phaseModeActionsIfChanged(now, decision.phaseMode)
+    private fun actuate(now: Instant, decision: ControlDecision, settling: Boolean): List<ControlAction> {
+        val phaseAttempt = if (settling) PhaseModeAttempt.NONE else phaseModeActionsIfChanged(now, decision.phaseMode)
         val limits = decision.allocation.limits
         val limitsChanged = tracker.limitsChanged(limits)
         val limitActions = limitActionsIfDue(now, limits, limitsChanged)
-        if (phaseAttempt.applied || limitsChanged) tracker.startSettle(now)
+        if (phaseAttempt.applied || (limitsChanged && !settling)) tracker.startSettle(now)
         return phaseAttempt.actions + limitActions
+    }
+
+    /** Zeigt in der Begründung, wenn die Rampe das Ziel noch nicht erreicht hat. */
+    private fun withRampNote(decision: ControlDecision, rampedLimits: List<ChargerLimit>): ControlDecision {
+        val held = decision.allocation.limits.zip(rampedLimits).filter { (target, ramped) -> target.current != ramped.current }
+        if (held.isEmpty()) return decision
+        val note = held.joinToString(", ") { (target, ramped) -> "${ramped.chargerId} ${ramped.current} A (Ziel ${target.current} A)" }
+        return decision.copy(reason = "${decision.reason}; Rampe: $note")
+    }
+
+    private fun measuredCurrent(chargerId: ChargerId, snapshots: List<ChargerSnapshot>): Ampere {
+        val charger = snapshots.firstOrNull { it.chargerId == chargerId }?.takeIf { it.status == ChargerStatus.CHARGING }
+        val phases = listOfNotNull(charger?.currentL1, charger?.currentL2, charger?.currentL3)
+        return phases.maxOrNull()?.let { kotlin.math.ceil(it).toInt() } ?: 0
     }
 
     private fun phaseModeActionsIfChanged(now: Instant, phaseMode: PhaseMode): PhaseModeAttempt {

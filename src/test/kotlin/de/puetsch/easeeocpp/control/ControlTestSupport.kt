@@ -105,9 +105,14 @@ fun chargerSnapshot(
     statusSince = statusSince,
 )
 
+/** Neutrale Rampe: die bestehenden Tests prüfen Regelwerte, nicht das Tempo des Stromanstiegs. */
+private const val UNLIMITED_RAMP_STEP = 100
+
 fun defaultControlProperties(historyFile: Path): ControlProperties = ControlProperties(
     actuationEnabled = true,
     historyFile = historyFile.toString(),
+    rampUpStep = UNLIMITED_RAMP_STEP,
+    rampUpInterval = java.time.Duration.ZERO,
 )
 
 /**

@@ -98,6 +98,31 @@ class ControlLoopTest {
     }
 
     @Test
+    @Story("Rampe")
+    fun `Stromanstieg im Regelzyklus nur um 1 A je 15 s, Absenkung sofort`() {
+        val historyFile = tempDir.resolve("ramp-history.jsonl")
+        val harness = ControlHarness(historyFile, defaultControlProperties(historyFile).copy(rampUpStep = 1, rampUpInterval = Duration.ofSeconds(15)))
+        harness.runCycle()
+        harness.charging.calls.clear()
+        harness.clock.advance(Duration.ofSeconds(31))
+        harness.setEntity(harness.properties.ha.entities.pvSurplusCharge, "off")
+        harness.setEntity(harness.properties.ha.entities.targetCurrent, "10")
+
+        harness.runCycle()
+
+        assertEquals(listOf("limit:$MULTONNEN_ID:7", "limit:$EINGANGSSEITE_ID:0"), harness.charging.calls)
+        assertTrue(harness.state().decision!!.reason.contains("Rampe"))
+
+        harness.charging.calls.clear()
+        harness.clock.advance(Duration.ofSeconds(5))
+        harness.setEntity(harness.properties.ha.entities.targetCurrent, "6")
+
+        harness.runCycle()
+
+        assertEquals(listOf("limit:$MULTONNEN_ID:6", "limit:$EINGANGSSEITE_ID:0"), harness.charging.calls)
+    }
+
+    @Test
     @Story("Phasenwechsel-Reihenfolge")
     fun `phase mode change is sent to both chargers before the limit change`() {
         val harness = harness()

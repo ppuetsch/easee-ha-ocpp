@@ -43,6 +43,8 @@ data class HaEntities(
 data class ControlProperties(
     val interval: Duration = Duration.ofSeconds(5),
     val settleDelay: Duration = Duration.ofSeconds(10),
+    val rampUpStep: Int = 1,
+    val rampUpInterval: Duration = Duration.ofSeconds(15),
     val gridVoltage: Int = 240,
     val minHousePower: Int = 100,
     val minChargeCurrent: Int = 6,
