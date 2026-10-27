@@ -18,6 +18,10 @@
 .PARAMETER DryRun
     Zeigt nur die Kommandos an, fuehrt nichts aus, liest keine Secrets und prueft die Keystore-Datei nicht.
 
+.PARAMETER HostNetwork
+    Startet den Container im Host-Netzwerk statt mit Port-Mapping. Noetig, wenn runc >= 1.5 im LXC-Docker-Host die Netzwerk-Sysctl
+    net.ipv4.ip_unprivileged_port_start nicht setzen darf (Container starten sonst mit Exit 126).
+
 .PARAMETER CheckOnly
     Fuehrt nur den Post-Deployment-Check gegen den laufenden Service aus (Version und Health), ohne zu deployen.
 
@@ -49,7 +53,8 @@ param(
     [switch] $Force,
     [switch] $PlainOcpp,
     [string] $ExpectedVersion = '',
-    [switch] $CheckOnly
+    [switch] $CheckOnly,
+    [switch] $HostNetwork
 )
 
 $ErrorActionPreference = 'Stop'
@@ -268,10 +273,15 @@ function Get-PlainOcppArgument {
     return ''
 }
 
+function Get-NetworkArguments {
+    if ($HostNetwork) { return '--network host ' }
+    return "-p ${HTTP_PORT}:8080 -p ${OCPP_TLS_PORT}:8443 "
+}
+
 function Get-RunCommand {
     $actuation = Get-ActuationValue
     return "docker run --restart always -d --name $CONTAINER_NAME " +
-        "-p ${HTTP_PORT}:8080 -p ${OCPP_TLS_PORT}:8443 " +
+        (Get-NetworkArguments) +
         "-v ${DATA_VOLUME}:/data -v ${REMOTE_SECRETS_DIR}:/secrets:ro " +
         "--env-file ~/$REMOTE_ENV_FILE_NAME " +
         "-e ACTUATION_ENABLED=$actuation " +
