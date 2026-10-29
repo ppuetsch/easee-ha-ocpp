@@ -75,6 +75,17 @@ class StickyEligibilityTest {
 
     @Test
     @Story("Haftung")
+    fun `ineligible charger becomes eligible again when the wallbox suspends it itself`() {
+        val waiting = chargerSnapshot(MULTONNEN_ID, status = ChargerStatus.SUSPENDED_EV, statusSince = start)
+        eligibility.isEligible(waiting, start.plusSeconds(121))
+
+        val suspendedByWallbox = chargerSnapshot(MULTONNEN_ID, status = ChargerStatus.SUSPENDED_EVSE, statusSince = start.plusSeconds(130))
+
+        assertTrue(eligibility.isEligible(suspendedByWallbox, start.plusSeconds(131)))
+    }
+
+    @Test
+    @Story("Haftung")
     fun `ineligible charger is released after being unplugged`() {
         val waiting = chargerSnapshot(MULTONNEN_ID, status = ChargerStatus.SUSPENDED_EV, statusSince = start)
         eligibility.isEligible(waiting, start.plusSeconds(121))

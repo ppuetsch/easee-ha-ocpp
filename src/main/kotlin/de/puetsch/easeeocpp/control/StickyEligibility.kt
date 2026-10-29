@@ -10,6 +10,8 @@ import java.time.Instant
  * Ein Charger, der in einem Wartezustand zu lange wartet, bleibt nicht berechtigt, auch wenn der Status
  * danach wieder zwischen Wartezuständen wechselt. Sonst würde die Stromverteilung bei jedem Statuswechsel
  * kippen. Die Berechtigung kehrt erst zurück, wenn der Charger wieder lädt, vorbereitet wird oder frei war.
+ * SUSPENDED_EVSE gibt frei: Die Wallbox pausiert dann wegen unseres eigenen 0-A-Limits. Ohne Freigabe bekäme
+ * ein ausgeschlossener Charger nie wieder Strom.
  */
 class StickyEligibility(private val policy: EligibilityPolicy) {
     private val waitingTooLong = mutableSetOf<ChargerId>()
@@ -30,6 +32,7 @@ class StickyEligibility(private val policy: EligibilityPolicy) {
             ChargerStatus.PREPARING,
             ChargerStatus.AVAILABLE,
             ChargerStatus.UNAVAILABLE,
+            ChargerStatus.SUSPENDED_EVSE,
         )
     }
 }
