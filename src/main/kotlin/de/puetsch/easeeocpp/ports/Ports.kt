@@ -7,13 +7,24 @@ import de.puetsch.easeeocpp.domain.model.EntityId
 import de.puetsch.easeeocpp.domain.model.PhaseMode
 import java.time.Instant
 
-data class HaEntityState(val entityId: EntityId, val state: String, val lastReported: Instant?) {
+/** lastChanged: letzter Wechsel des Werts; lastReported: letzte Meldung, auch ohne Wertänderung. */
+data class HaEntityState(
+    val entityId: EntityId,
+    val state: String,
+    val lastReported: Instant?,
+    val lastChanged: Instant? = null,
+) {
     fun isUsable(): Boolean = state != "unavailable" && state != "unknown"
 }
 
 interface HomeAssistantStates {
     fun isConnected(): Boolean
     fun state(entityId: EntityId): HaEntityState?
+}
+
+interface HomeAssistantActions {
+    /** Ruft einen HA-Dienst auf; true, wenn HA den Aufruf erfolgreich beantwortet hat. */
+    fun callService(domain: String, service: String, data: Map<String, Any?>): Boolean
 }
 
 interface ChargerFleet {

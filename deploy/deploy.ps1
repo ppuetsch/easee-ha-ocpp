@@ -37,6 +37,10 @@
 .PARAMETER KeystorePath
     Lokaler Pfad zum Server-Keystore (relativ zum Repo-Root). Standard: secrets/keystore.p12.
 
+.PARAMETER OcppServer
+    Alter Weg: Der Service ist selbst OCPP-Server der Charger (Port 8443, Keystore, RFID-Whitelist).
+    Ohne den Schalter steuert er die Charger ueber die Easee-Integration in Home Assistant.
+
 .PARAMETER Force
     Unterdrueckt die Bestaetigungsabfrage bei -StopLegacy ohne -Actuate.
 #>
@@ -52,6 +56,7 @@ param(
     [switch] $Actuate,
     [switch] $Force,
     [switch] $PlainOcpp,
+    [switch] $OcppServer,
     [string] $ExpectedVersion = '',
     [switch] $CheckOnly,
     [switch] $HostNetwork
@@ -72,8 +77,10 @@ $CONFIRMATION_ANSWERS = @('j', 'ja', 'y', 'yes')
 $HTTP_PORT = 8080
 $OCPP_TLS_PORT = 8443
 $DATA_VOLUME = 'easee-data'
-$REQUIRED_SECRET_NAMES = @('HA_TOKEN', 'EASEE_USERNAME', 'EASEE_PASSWORD', 'OCPP_BASIC_AUTH_PASSWORD', 'EASEE_OCPP_ALLOWEDIDTAGS')
-if (-not $PlainOcpp) { $REQUIRED_SECRET_NAMES += 'KEYSTORE_PASSWORD' }
+$REQUIRED_SECRET_NAMES = @('HA_TOKEN', 'EASEE_USERNAME', 'EASEE_PASSWORD')
+if ($OcppServer) { $REQUIRED_SECRET_NAMES += @('OCPP_BASIC_AUTH_PASSWORD', 'EASEE_OCPP_ALLOWEDIDTAGS') }
+$NEEDS_KEYSTORE = $OcppServer -and -not $PlainOcpp
+if ($NEEDS_KEYSTORE) { $REQUIRED_SECRET_NAMES += 'KEYSTORE_PASSWORD' }
 $PROJECT_ROOT = Split-Path -Parent $PSScriptRoot
 $SHORT_SHA_LENGTH = 7
 $VERSION_CHECK_TIMEOUT_SECONDS = 120
@@ -268,14 +275,17 @@ function Send-EnvFile([string] $LocalPath) {
     Invoke-Remote "chmod 600 ~/$REMOTE_ENV_FILE_NAME"
 }
 
-function Get-PlainOcppArgument {
-    if ($PlainOcpp) { return '-e EASEE_OCPP_SSL_ENABLED=false ' }
-    return ''
+function Get-OcppArguments {
+    if (-not $OcppServer) { return '' }
+    $arguments = '-e EASEE_OCPP_ENABLED=true '
+    if ($PlainOcpp) { $arguments += '-e EASEE_OCPP_SSL_ENABLED=false ' }
+    return $arguments
 }
 
 function Get-NetworkArguments {
     if ($HostNetwork) { return '--network host ' }
-    return "-p ${HTTP_PORT}:8080 -p ${OCPP_TLS_PORT}:8443 "
+    if ($OcppServer) { return "-p ${HTTP_PORT}:8080 -p ${OCPP_TLS_PORT}:8443 " }
+    return "-p ${HTTP_PORT}:8080 "
 }
 
 function Get-RunCommand {
@@ -285,7 +295,7 @@ function Get-RunCommand {
         "-v ${DATA_VOLUME}:/data -v ${REMOTE_SECRETS_DIR}:/secrets:ro " +
         "--env-file ~/$REMOTE_ENV_FILE_NAME " +
         "-e ACTUATION_ENABLED=$actuation " +
-        (Get-PlainOcppArgument) +
+        (Get-OcppArguments) +
         $Image
 }
 
@@ -356,11 +366,11 @@ function Invoke-Deployment {
         return
     }
     Assert-DeploymentPolicy
-    if (-not $PlainOcpp) { Assert-KeystoreFilePresent }
+    if ($NEEDS_KEYSTORE) { Assert-KeystoreFilePresent }
     Stop-LegacyContainerIfRequested
     Publish-Image
     Deploy-WithEnvFile
-    if (-not $PlainOcpp) { Send-KeystoreFile }
+    if ($NEEDS_KEYSTORE) { Send-KeystoreFile }
     Replace-Container
     Invoke-Remote "docker ps --filter 'name=^$CONTAINER_NAME`$' --format '{{.Status}}'"
     Assert-ServiceRunsVersion $script:VersionToDeploy

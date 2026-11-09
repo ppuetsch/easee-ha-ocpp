@@ -37,6 +37,7 @@ private const val FIELD_NEW_STATE = "new_state"
 private const val FIELD_STATE = "state"
 private const val FIELD_LAST_REPORTED = "last_reported"
 private const val FIELD_LAST_UPDATED = "last_updated"
+private const val FIELD_LAST_CHANGED = "last_changed"
 private const val FIELD_ACCESS_TOKEN = "access_token"
 private const val FIELD_DOMAIN = "domain"
 private const val FIELD_SERVICE = "service"
@@ -122,7 +123,8 @@ internal object HaMessageCodec {
         val entityId = node.textOf(FIELD_ENTITY_ID) ?: return null
         val state = node.textOf(FIELD_STATE) ?: return null
         val reportedText = node.textOf(FIELD_LAST_REPORTED) ?: node.textOf(FIELD_LAST_UPDATED)
-        return HaEntityState(entityId, state, parseTimestamp(reportedText))
+        val changedText = node.textOf(FIELD_LAST_CHANGED) ?: node.textOf(FIELD_LAST_UPDATED)
+        return HaEntityState(entityId, state, parseTimestamp(reportedText), parseTimestamp(changedText))
     }
 
     private fun parseTimestamp(text: String?): Instant? {

@@ -10,12 +10,16 @@ data class AppProperties(
     val ocpp: OcppProperties = OcppProperties(),
     val cloud: EaseeCloudProperties = EaseeCloudProperties(),
     val chargers: List<ChargerProperties> = listOf(
-        ChargerProperties(id = "EHDFQLBX", name = "Mülltonnen"),
-        ChargerProperties(id = "EH2NSSVK", name = "Eingangsseite"),
+        ChargerProperties(id = "EHDFQLBX", name = "Mülltonnen", haEntityPrefix = "mulltonnen"),
+        ChargerProperties(id = "EH2NSSVK", name = "Eingangsseite", haEntityPrefix = "eingangsseite"),
     ),
 )
 
-data class ChargerProperties(val id: String, val name: String)
+/**
+ * haEntityPrefix: Anfang der Entity-IDs, die die Easee-Integration in HA für den Charger anlegt
+ * (aus dem Gerätenamen, z. B. sensor.mulltonnen_ocpp_leistung).
+ */
+data class ChargerProperties(val id: String, val name: String, val haEntityPrefix: String = "")
 
 data class HaProperties(
     val url: String = "ws://homeassistant.fritz.box:8123/api/websocket",
@@ -25,6 +29,7 @@ data class HaProperties(
     val reconnectBackoffMin: Duration = Duration.ofSeconds(1),
     val reconnectBackoffMax: Duration = Duration.ofSeconds(60),
     val entities: HaEntities = HaEntities(),
+    val chargerLimitValidity: Duration = Duration.ofSeconds(120),
 )
 
 data class HaEntities(
@@ -63,7 +68,9 @@ data class ControlProperties(
     val historyFile: String = "data/control-history.jsonl",
 )
 
+/** enabled: eigener OCPP-Server (alter Weg); sonst steuert der Service die Charger über Home Assistant. */
 data class OcppProperties(
+    val enabled: Boolean = false,
     val port: Int = 8443,
     val path: String = "/ocpp",
     val basicAuthPassword: String = "",

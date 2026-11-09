@@ -1,20 +1,22 @@
 # easee-ha-ocpp
 
 Spring-Boot-Service (Kotlin) für PV-Überschussladen zweier Easee-Charger. Ersetzt `easee/easee.py`.
-Home Assistant liefert die Werte per WebSocket, die Charger werden per direktem OCPP 1.6J begrenzt (im Heimnetz unverschlüsselt `ws://`, siehe unten);
-nur der Phasenmodus geht weiter über die Easee-Cloud-REST-API.
+Home Assistant liefert die Werte per WebSocket. Die Charger hängen per lokalem OCPP an Home Assistant (Fork der Easee-Integration, `ppuetsch/easee_hass`, Branch `local-ocpp`); der Service liest ihre Messwerte aus HA und setzt die Limits über den HA-Dienst `easee.ocpp_set_current_limit`.
+Nur der Phasenmodus geht weiter über die Easee-Cloud-REST-API. Der frühere eigene OCPP-Server ist noch enthalten, aber aus (`easee.ocpp.enabled=false`, Rückweg siehe unten).
 
 Details und Entscheidungen: [docs/PLAN.md](docs/PLAN.md).
 
 ## Betrieb
 - GUI: `http://<host>:8080/` (aktueller Zustand, Berechnung, letzte Eingriffe), JSON: `/api/state`, Health: `/actuator/health`. Kein Login, nur LAN.
 - Health: DOWN nur, wenn der Regelzyklus seit über 60 s nicht gelaufen ist (oder nach einer Anlaufzeit von 60 s noch keiner lief). Eine fehlende HA-Verbindung ist kein DOWN, sondern steht als Detail `haConnected`. Der Docker-HEALTHCHECK prüft `/actuator/health`.
-- OCPP: `ws://<host>:8443/ocpp/<Seriennummer>`, Basic-Auth (Benutzer = Seriennummer). Deployt mit `deploy.ps1 -PlainOcpp`.
+- Charger über HA: Messwerte aus `binary_sensor.<prefix>_ocpp_verbunden`, `sensor.<prefix>_ocpp_status`, `_ocpp_leistung`, `_ocpp_strom_l1..3`, `_ocpp_spannung_l1..3` (`prefix` je Charger in `easee.chargers`, z. B. `mulltonnen`). Limit per `easee.ocpp_set_current_limit` (Seriennummer, Strom, Dauer), frische Messwerte per `easee.ocpp_trigger_message`.
 - **Schattenmodus ist Standard** (`ACTUATION_ENABLED=false`): der Service rechnet und zeigt an, sendet aber nichts an Charger und Easee-Cloud. Erst mit `deploy/deploy.ps1 -Actuate` regelt er.
-- Fail-safe: Das Regelprofil läuft nach 2 min ab, danach gilt ein 0-A-Basisprofil. Fällt der Service aus, hört die Ladung also auf. Details unten unter „Dienstausfall“.
-- Secrets und Freigabe per Env-Var: `HA_TOKEN`, `EASEE_USERNAME`, `EASEE_PASSWORD`, `OCPP_BASIC_AUTH_PASSWORD`, `KEYSTORE_PASSWORD`, `EASEE_OCPP_ALLOWEDIDTAGS` (RFID-Whitelist, siehe unten).
+- Fail-safe: Das Limit läuft nach 2 min ab, danach gilt der OCPP-Maximalstrom der Integration. Der steht für beide Charger auf 0 A (`number.<prefix>_ocpp_maximalstrom`). Fällt der Service aus, hört die Ladung also auf. Details unten unter „Dienstausfall“.
+- Secrets per Env-Var: `HA_TOKEN`, `EASEE_USERNAME`, `EASEE_PASSWORD`. Nur mit eigenem OCPP-Server (`deploy.ps1 -OcppServer`) zusätzlich `OCPP_BASIC_AUTH_PASSWORD`, `KEYSTORE_PASSWORD`, `EASEE_OCPP_ALLOWEDIDTAGS`.
 
 ## RFID-Freigabe
+Die Freigabe entscheidet jetzt die Easee-Integration in HA: Whitelist unter Easee → Konfigurieren → RFID-Karten, neue Karten mit dem Button „OCPP nächste RFID-Karte anlernen“. Der folgende Abschnitt gilt nur noch für den eigenen OCPP-Server (`-OcppServer`).
+
 - Geladen wird nur mit einer Karte, deren ID auf der Whitelist steht. `Authorize` und `StartTransaction` antworten für andere Karten mit `Invalid`. `StopTransaction` wird immer akzeptiert.
 - Die Whitelist kommt aus `EASEE_OCPP_ALLOWEDIDTAGS` (kommagetrennt). Der Vergleich ignoriert Groß-/Kleinschreibung und Leerzeichen am Rand. Ist die Liste leer, werden alle Karten abgelehnt; der Service warnt beim Start.
 - Die Liste liegt als User-Umgebungsvariable gleichen Namens auf dem Windows-PC. `deploy.ps1` bricht ab, wenn sie fehlt.
@@ -27,8 +29,9 @@ Details und Entscheidungen: [docs/PLAN.md](docs/PLAN.md).
 - `FreeCharging` wird nicht genutzt: Der Service setzt es nie am Charger, da Easee die Keys nicht kennt und die Freigabe über die Whitelist läuft.
 
 ## Dienstausfall
-- Das Regelprofil gilt 2 min (`easee.ocpp.profile-duration`, Standard 120 s). Der Service erneuert es alle 60 s (`easee.control.profile-refresh-interval`). Danach gilt das Basisprofil mit 0 A, und die Ladung stoppt.
-- Der Start prüft, dass die Erneuerung kürzer ist als die Profildauer. Andernfalls bricht der Service mit einer Fehlermeldung ab.
+- Das Limit gilt 2 min (`easee.ha.charger-limit-validity`, Standard 120 s; die Integration legt es als Profil auf Stack-Ebene 1 ab). Der Service erneuert es alle 60 s (`easee.control.profile-refresh-interval`). Danach gilt der OCPP-Maximalstrom der Integration (Stack-Ebene 0, auf 0 A gestellt), und die Ladung stoppt.
+- Fällt Home Assistant aus, gilt dasselbe: Die Charger behalten kein Limit über 2 min hinaus.
+- Der Start prüft, dass die Erneuerung kürzer ist als die Gültigkeit. Andernfalls bricht der Service mit einer Fehlermeldung ab.
 - **Einschränkung:** Dieses Verhalten gilt nur, solange der Charger die Profile behält. Nach einem Neustart des Chargers ist ungeprüft, ob er das Regelprofil noch hat oder wie er ohne Service reagiert.
 - Wie im Altskript wird nie unter `minimum_ev_current` geregelt; die Pausen-Hysterese greift daher nur bei Mindeststrom 0.
 
@@ -60,6 +63,10 @@ CI (`.github/workflows/ci.yml`) lädt JUnit-XML, Allure-Report, JaCoCo und Playw
 - **`FreeCharging`/`FreeChargingIdTag`** kennt Easee nicht (`ProtocolError`) und wird deshalb nicht mehr gesendet. Freigabe läuft ausschließlich über die RFID-Whitelist (siehe „RFID-Freigabe“).
 - **Bekanntes Risiko:** Nach einem Neustart des Service blieb ein Charger ~14 min still (verbunden, aber ohne BootNotification), bis seine Konfiguration erneut angewendet wurde (`deploy/activate-easee-ocpp.ps1 -Serial <Nr> -SkipCircuitReset -Plain`). Danach Status in der GUI prüfen.
 - Der alte Container `pv-surcharge` ist gestoppt, nicht gelöscht (`--restart=no`).
+
+## Rückweg zum eigenen OCPP-Server
+1. Charger in HA aus der Easee-Integration entfernen (OCPP-Einträge löschen; die Integration stellt sie auf Cloud zurück) und mit `deploy/activate-easee-ocpp.ps1 -Serial <Nr> -SkipCircuitReset -Plain` auf den Service zeigen lassen.
+2. `deploy/deploy.ps1 -Local -HostNetwork -OcppServer -PlainOcpp -Actuate`.
 
 ## Rollback auf den alten Regler
 1. `deploy/deactivate-easee-ocpp.ps1 -Serial EHDFQLBX` und `-Serial EH2NSSVK` (zurück auf Cloud).

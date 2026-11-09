@@ -3,6 +3,7 @@ package de.puetsch.easeeocpp.ha
 import de.puetsch.easeeocpp.config.AppProperties
 import de.puetsch.easeeocpp.domain.model.EntityId
 import de.puetsch.easeeocpp.ports.HaEntityState
+import de.puetsch.easeeocpp.ports.HomeAssistantActions
 import de.puetsch.easeeocpp.ports.HomeAssistantStates
 import org.slf4j.LoggerFactory
 import org.springframework.context.SmartLifecycle
@@ -29,7 +30,7 @@ class HaWebSocketClient(
     private val httpClient: HttpClient = HttpClient.newHttpClient(),
     private val commandTimeout: Duration = CALL_SERVICE_TIMEOUT,
     private val pingInterval: Duration = PING_INTERVAL,
-) : HomeAssistantStates, HaConnectionProblemSource, SmartLifecycle {
+) : HomeAssistantStates, HomeAssistantActions, HaConnectionProblemSource, SmartLifecycle {
     private val log = LoggerFactory.getLogger(HaWebSocketClient::class.java)
     private val connectionObserver = object : HaConnectionObserver {
         override fun connectionReady(connection: HaConnection) = onConnectionReady(connection)
@@ -87,7 +88,7 @@ class HaWebSocketClient(
 
     override fun state(entityId: EntityId): HaEntityState? = stateCache.get(entityId)
 
-    fun callService(domain: String, service: String, data: Map<String, Any?>): Boolean {
+    override fun callService(domain: String, service: String, data: Map<String, Any?>): Boolean {
         val connection = activeConnection?.takeIf { it.isReady() } ?: return false
         val commandId = commands.reserveId()
         val pendingResult = commands.expectResult(commandId)
