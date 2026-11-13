@@ -90,7 +90,7 @@ internal class HaConnection(
     private fun handleText(text: String) {
         when (val message = HaMessageCodec.parse(text)) {
             HaInboundMessage.AuthRequired -> send(HaMessageCodec.authMessage(accessToken))
-            HaInboundMessage.AuthOk -> requestStates()
+            HaInboundMessage.AuthOk -> subscribeToStateChanges()
             is HaInboundMessage.AuthInvalid -> rejectAuthentication(message.reason)
             HaInboundMessage.Pong -> liveness.pongReceived()
             is HaInboundMessage.Result -> handleResult(message)
@@ -99,17 +99,31 @@ internal class HaConnection(
         }
     }
 
-    private fun requestStates() {
-        statesRequestId = commands.reserveId()
-        send(HaMessageCodec.getStatesMessage(statesRequestId))
+    /**
+     * Erst abonnieren, dann den Zustand laden: HA liefert Events und Antworten in Reihenfolge. Was vor der
+     * get_states-Antwort passiert, steckt im Abbild; alles danach kommt als Event. Umgekehrt ginge jede Änderung
+     * zwischen Abbild und Abo verloren, und der Cache bliebe dauerhaft veraltet.
+     */
+    private fun subscribeToStateChanges() {
+        subscribeRequestId = commands.reserveId()
+        send(HaMessageCodec.subscribeStateChangedMessage(subscribeRequestId))
     }
 
     private fun handleResult(result: HaInboundMessage.Result) {
         when (result.id) {
-            statesRequestId -> handleStatesResult(result)
             subscribeRequestId -> handleSubscribeResult(result)
+            statesRequestId -> handleStatesResult(result)
             else -> commands.completeResult(result.id, result.success)
         }
+    }
+
+    private fun handleSubscribeResult(result: HaInboundMessage.Result) {
+        if (!result.success) {
+            reportLost("subscribe_events fehlgeschlagen: ${result.errorMessage}")
+            return
+        }
+        statesRequestId = commands.reserveId()
+        send(HaMessageCodec.getStatesMessage(statesRequestId))
     }
 
     private fun handleStatesResult(result: HaInboundMessage.Result) {
@@ -118,15 +132,6 @@ internal class HaConnection(
             return
         }
         stateCache.replaceAll(HaMessageCodec.parseStates(result.payload))
-        subscribeRequestId = commands.reserveId()
-        send(HaMessageCodec.subscribeStateChangedMessage(subscribeRequestId))
-    }
-
-    private fun handleSubscribeResult(result: HaInboundMessage.Result) {
-        if (!result.success) {
-            reportLost("subscribe_events fehlgeschlagen: ${result.errorMessage}")
-            return
-        }
         ready = true
         observer.connectionReady(this)
     }
