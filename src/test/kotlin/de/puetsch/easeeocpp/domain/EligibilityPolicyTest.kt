@@ -17,7 +17,9 @@ import java.time.Instant
 @Feature("Eligibility der Charger")
 class EligibilityPolicyTest {
 
-    private val policy = EligibilityPolicy(ControlProperties())
+    private val properties = ControlProperties()
+    private val gracePeriod: Duration = properties.ineligibleAfter
+    private val policy = EligibilityPolicy(properties)
     private val now: Instant = Instant.parse("2026-10-25T10:00:00Z")
 
     @Test
@@ -41,21 +43,21 @@ class EligibilityPolicyTest {
 
     @Test
     fun `suspended by ev within grace period stays eligible`() {
-        val snapshot = snapshot(status = ChargerStatus.SUSPENDED_EV, statusSince = now.minusSeconds(120))
+        val snapshot = snapshot(status = ChargerStatus.SUSPENDED_EV, statusSince = now.minus(gracePeriod))
 
         assertTrue(policy.isEligible(snapshot, now))
     }
 
     @Test
     fun `suspended by ev after grace period is not eligible`() {
-        val snapshot = snapshot(status = ChargerStatus.SUSPENDED_EV, statusSince = now.minus(Duration.ofSeconds(121)))
+        val snapshot = snapshot(status = ChargerStatus.SUSPENDED_EV, statusSince = now.minus(gracePeriod.plusSeconds(1)))
 
         assertFalse(policy.isEligible(snapshot, now))
     }
 
     @Test
     fun `finishing after grace period is not eligible`() {
-        val snapshot = snapshot(status = ChargerStatus.FINISHING, statusSince = now.minus(Duration.ofSeconds(121)))
+        val snapshot = snapshot(status = ChargerStatus.FINISHING, statusSince = now.minus(gracePeriod.plusSeconds(1)))
 
         assertFalse(policy.isEligible(snapshot, now))
     }

@@ -59,7 +59,7 @@ data class ControlProperties(
     val circuitMaxCurrentPerPhase: Int = 32,
     val actuationEnabled: Boolean = false,
     val profileRefreshInterval: Duration = Duration.ofSeconds(60),
-    val ineligibleAfter: Duration = Duration.ofSeconds(120),
+    val ineligibleAfter: Duration = Duration.ofMinutes(10),
     val pauseDelay: Duration = Duration.ofSeconds(60),
     val allowRebalanceForMinCurrent: Boolean = false,
     val priorityIdleAfter: Duration = Duration.ofMinutes(2),
