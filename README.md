@@ -1,7 +1,7 @@
 # easee-ha-ocpp
 
 Spring-Boot-Service (Kotlin) für PV-Überschussladen zweier Easee-Charger. Ersetzt `easee/easee.py`.
-Home Assistant liefert die Werte per WebSocket. Die Charger hängen per lokalem OCPP an Home Assistant (Fork der Easee-Integration, `ppuetsch/easee_hass`, Branch `local-ocpp`); der Service liest ihre Messwerte aus HA und setzt die Limits über den HA-Dienst `easee.ocpp_set_current_limit`.
+Home Assistant liefert die Werte per WebSocket. Die Charger hängen per lokalem OCPP an Home Assistant (Integration „Easee Local OCPP“, `ppuetsch/easee-ocpp`); der Service liest ihre Messwerte aus HA und setzt die Limits über den HA-Dienst `easee_ocpp.set_current_limit`.
 Nur der Phasenmodus geht weiter über die Easee-Cloud-REST-API. Der frühere eigene OCPP-Server ist noch enthalten, aber aus (`easee.ocpp.enabled=false`, Rückweg siehe unten).
 
 Details und Entscheidungen: [docs/PLAN.md](docs/PLAN.md).
@@ -9,7 +9,7 @@ Details und Entscheidungen: [docs/PLAN.md](docs/PLAN.md).
 ## Betrieb
 - GUI: `http://<host>:8080/` (aktueller Zustand, Berechnung, letzte Eingriffe), JSON: `/api/state`, Health: `/actuator/health`. Kein Login, nur LAN.
 - Health: DOWN nur, wenn der Regelzyklus seit über 60 s nicht gelaufen ist (oder nach einer Anlaufzeit von 60 s noch keiner lief). Eine fehlende HA-Verbindung ist kein DOWN, sondern steht als Detail `haConnected`. Der Docker-HEALTHCHECK prüft `/actuator/health`.
-- Charger über HA: Messwerte aus `binary_sensor.<prefix>_ocpp_verbunden`, `sensor.<prefix>_ocpp_status`, `_ocpp_leistung`, `_ocpp_strom_l1..3`, `_ocpp_spannung_l1..3` (`prefix` je Charger in `easee.chargers`, z. B. `mulltonnen`). Limit per `easee.ocpp_set_current_limit` (Seriennummer, Strom, Dauer), frische Messwerte per `easee.ocpp_trigger_message`.
+- Charger über HA: Messwerte aus `binary_sensor.<prefix>_ocpp_verbunden`, `sensor.<prefix>_ocpp_status`, `_ocpp_leistung`, `_ocpp_strom_l1..3`, `_ocpp_spannung_l1..3` (`prefix` je Charger in `easee.chargers`, z. B. `mulltonnen`). Limit per `easee_ocpp.set_current_limit` (Seriennummer, Strom, Dauer), frische Messwerte per `easee_ocpp.trigger_message`.
 - **Schattenmodus ist Standard** (`ACTUATION_ENABLED=false`): der Service rechnet und zeigt an, sendet aber nichts an Charger und Easee-Cloud. Erst mit `deploy/deploy.ps1 -Actuate` regelt er.
 - Fail-safe: Das Limit läuft nach 2 min ab, danach gilt der OCPP-Maximalstrom der Integration. Der steht für beide Charger auf 0 A (`number.<prefix>_ocpp_maximalstrom`). Fällt der Service aus, hört die Ladung also auf. Details unten unter „Dienstausfall“.
 - Secrets per Env-Var: `HA_TOKEN`, `EASEE_USERNAME`, `EASEE_PASSWORD`. Nur mit eigenem OCPP-Server (`deploy.ps1 -OcppServer`) zusätzlich `OCPP_BASIC_AUTH_PASSWORD`, `KEYSTORE_PASSWORD`, `EASEE_OCPP_ALLOWEDIDTAGS`.

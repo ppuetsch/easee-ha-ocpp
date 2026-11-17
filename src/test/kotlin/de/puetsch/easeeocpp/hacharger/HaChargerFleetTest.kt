@@ -109,7 +109,7 @@ class HaChargerFleetTest {
 
         assertTrue(result.success)
         assertEquals(
-            Triple("easee", "ocpp_set_current_limit", mapOf("serial" to MULTONNEN, "current" to 10, "duration" to 120L)),
+            Triple("easee_ocpp", "set_current_limit", mapOf("serial" to MULTONNEN, "current" to 10, "duration" to 120L)),
             actions.calls.single(),
         )
     }
@@ -129,7 +129,7 @@ class HaChargerFleetTest {
         fleet(actions).requestFreshMeasurements()
 
         assertEquals(
-            listOf(Triple("easee", "ocpp_trigger_message", mapOf<String, Any?>("serial" to MULTONNEN, "message" to "MeterValues"))),
+            listOf(Triple("easee_ocpp", "trigger_message", mapOf<String, Any?>("serial" to MULTONNEN, "message" to "MeterValues"))),
             actions.calls,
         )
     }

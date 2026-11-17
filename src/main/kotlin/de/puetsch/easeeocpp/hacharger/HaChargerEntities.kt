@@ -6,7 +6,7 @@ import de.puetsch.easeeocpp.domain.model.EntityId
 private const val PHASE_COUNT = 3
 
 /**
- * Entity-IDs, die die Easee-Integration (lokales OCPP) für einen Charger anlegt. Die Endungen stammen aus den
+ * Entity-IDs, die die Integration „Easee Local OCPP“ für einen Charger anlegt (Gerät „<Name> OCPP“). Die Endungen stammen aus den
  * deutschen Entity-Namen der Integration („OCPP-Leistung“ → `_ocpp_leistung`).
  */
 data class HaChargerEntities(

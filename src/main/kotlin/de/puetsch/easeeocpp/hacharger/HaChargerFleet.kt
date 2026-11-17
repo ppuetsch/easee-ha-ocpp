@@ -19,15 +19,16 @@ import java.time.Clock
 import java.time.Duration
 import java.time.Instant
 
-private const val INTEGRATION_DOMAIN = "easee"
-private const val SERVICE_SET_CURRENT_LIMIT = "ocpp_set_current_limit"
-private const val SERVICE_TRIGGER_MESSAGE = "ocpp_trigger_message"
+private const val INTEGRATION_DOMAIN = "easee_ocpp"
+private const val SERVICE_SET_CURRENT_LIMIT = "set_current_limit"
+private const val SERVICE_TRIGGER_MESSAGE = "trigger_message"
 private const val MESSAGE_METER_VALUES = "MeterValues"
 private const val STATE_ON = "on"
 private const val NO_POWER_WATT: Watt = 0.0
 
 /**
- * Steuert die Charger über die Easee-Integration in Home Assistant, die ihr OCPP-Server ist.
+ * Steuert die Charger über die Integration „Easee Local OCPP“ (ppuetsch/easee-ocpp) in Home Assistant, die ihr
+ * OCPP-Server ist.
  *
  * Fail-safe wie beim eigenen OCPP-Server: Jedes Limit gilt nur [AppProperties.ha] `chargerLimitValidity` lang
  * (Stack-Ebene 1). Erneuert der Service es nicht mehr, gilt am Charger wieder der OCPP-Maximalstrom der
