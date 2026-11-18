@@ -59,6 +59,8 @@ data class ControlProperties(
     val circuitMaxCurrentPerPhase: Int = 32,
     val actuationEnabled: Boolean = false,
     val profileRefreshInterval: Duration = Duration.ofSeconds(60),
+    /** So lange erneuert der Service die letzten Limits weiter, wenn ein Pflichteingang aus HA fehlt. */
+    val missingInputHold: Duration = Duration.ofMinutes(5),
     val ineligibleAfter: Duration = Duration.ofMinutes(10),
     val pauseDelay: Duration = Duration.ofSeconds(60),
     val allowRebalanceForMinCurrent: Boolean = false,

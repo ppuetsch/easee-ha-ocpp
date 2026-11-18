@@ -185,6 +185,56 @@ class ControlLoopTest {
     }
 
     @Test
+    @Story("Fehlender Eingang")
+    fun `briefly missing input keeps refreshing the last limits unchanged`() {
+        val harness = harness()
+        harness.runCycle()
+        harness.charging.calls.clear()
+        val pvEntity = harness.properties.ha.entities.pvPower
+        harness.setEntity(pvEntity, "unavailable")
+
+        harness.clock.advance(Duration.ofSeconds(30))
+        harness.runCycle()
+        assertTrue(harness.charging.calls.isEmpty())
+
+        harness.clock.advance(Duration.ofSeconds(31))
+        harness.runCycle()
+
+        assertEquals(listOf("limit:$MULTONNEN_ID:7", "limit:$EINGANGSSEITE_ID:0"), harness.charging.calls)
+        assertEquals(SKIP_MISSING_INPUT_PREFIX + pvEntity + HOLDING_LAST_LIMITS_NOTE, harness.state().skippedReason)
+        assertNull(harness.state().decision)
+    }
+
+    @Test
+    @Story("Fehlender Eingang")
+    fun `limits are no longer refreshed once the missing input hold has passed`() {
+        val harness = harness()
+        harness.runCycle()
+        harness.setEntity(harness.properties.ha.entities.pvPower, "unavailable")
+        harness.clock.advance(harness.properties.control.missingInputHold.plusSeconds(1))
+        harness.charging.calls.clear()
+
+        harness.runCycle()
+
+        assertTrue(harness.charging.calls.isEmpty())
+        assertEquals(SKIP_MISSING_INPUT_PREFIX + harness.properties.ha.entities.pvPower, harness.state().skippedReason)
+    }
+
+    @Test
+    @Story("Fehlender Eingang")
+    fun `grid charging continues while the pv sensor is unavailable`() {
+        val harness = harness()
+        harness.setEntity(harness.properties.ha.entities.pvSurplusCharge, "off")
+        harness.setEntity(harness.properties.ha.entities.targetCurrent, "16.0")
+        harness.setEntity(harness.properties.ha.entities.pvPower, "unavailable")
+
+        harness.runCycle()
+
+        assertTrue(harness.charging.calls.any { it.startsWith("limit:") && it.endsWith(":16") }, harness.charging.calls.toString())
+        assertNull(harness.state().skippedReason)
+    }
+
+    @Test
     @Story("HA getrennt")
     fun `disconnected home assistant skips the cycle without actuation`() {
         val harness = harness()
