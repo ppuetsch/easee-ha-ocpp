@@ -65,7 +65,7 @@ CI (`.github/workflows/ci.yml`) lädt JUnit-XML, Allure-Report, JaCoCo und Playw
 - Der alte Container `pv-surcharge` ist gestoppt, nicht gelöscht (`--restart=no`).
 
 ## Rückweg zum eigenen OCPP-Server
-1. Charger in HA aus der Easee-Integration entfernen (OCPP-Einträge löschen; die Integration stellt sie auf Cloud zurück) und mit `deploy/activate-easee-ocpp.ps1 -Serial <Nr> -SkipCircuitReset -Plain` auf den Service zeigen lassen.
+1. Charger in HA aus der Integration „Easee Local OCPP“ entfernen (die Integration stellt sie auf Cloud zurück) und mit `deploy/activate-easee-ocpp.ps1 -Serial <Nr> -SkipCircuitReset -Plain` auf den Service zeigen lassen.
 2. `deploy/deploy.ps1 -Local -HostNetwork -OcppServer -PlainOcpp -Actuate`.
 
 ## Rollback auf den alten Regler
