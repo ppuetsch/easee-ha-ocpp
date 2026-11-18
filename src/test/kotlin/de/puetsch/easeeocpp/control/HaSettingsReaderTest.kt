@@ -102,6 +102,36 @@ class HaSettingsReaderTest {
     }
 
     @Test
+    @Story("Unvollständige Eingänge")
+    fun `without surplus charging a missing power value does not block the cycle and counts as zero`() {
+        states.set(entities.pvSurplusCharge, "off")
+        states.set(entities.pvPower, "unavailable")
+        states.clear(entities.gridPower)
+
+        val readings = completeReadings()
+
+        assertEquals(0.0, readings.pvPower, 0.0)
+        assertEquals(0.0, readings.gridPower, 0.0)
+        assertEquals(16, readings.settings.fixedCurrent)
+    }
+
+    @Test
+    @Story("Unvollständige Eingänge")
+    fun `with surplus charging a missing power value is still reported as missing`() {
+        states.set(entities.pvPower, "unavailable")
+
+        assertEquals(HaReadResult.MissingInput(entities.pvPower), reader.read())
+    }
+
+    @Test
+    @Story("Unvollständige Eingänge")
+    fun `missing surplus switch is reported as missing`() {
+        states.set(entities.pvSurplusCharge, "unavailable")
+
+        assertEquals(HaReadResult.MissingInput(entities.pvSurplusCharge), reader.read())
+    }
+
+    @Test
     @Story("Schalter")
     fun `input boolean on is true and anything else is false`() {
         assertEquals(true, completeReadings().preferCarOverBattery)

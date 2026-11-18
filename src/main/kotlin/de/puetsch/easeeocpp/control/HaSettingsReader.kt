@@ -11,11 +11,14 @@ import de.puetsch.easeeocpp.ports.HomeAssistantStates
 import org.springframework.stereotype.Component
 
 private const val HA_ON = "on"
+private const val NOT_MEASURED: Watt = 0.0
 
 /**
- * Liest die Regel-Eingänge aus dem HA-Zustandscache. Fehlt ein Eingang oder ist er `unavailable`/`unknown`,
- * wird der Zyklus übersprungen statt mit einem Ersatzwert zu regeln. Ein Alter-Check entfällt bewusst:
- * unveränderte HA-Werte erzeugen kein Event, sind also nicht veraltet.
+ * Liest die Regel-Eingänge aus dem HA-Zustandscache. Fehlt ein Pflichteingang oder ist er
+ * `unavailable`/`unknown`, wird der Zyklus übersprungen statt mit einem Ersatzwert zu regeln.
+ * Die Leistungswerte braucht nur das Überschussladen: Ist es aus, zählen fehlende Leistungswerte als 0 W
+ * (nur Anzeige), damit ein Sensoraussetzer z. B. des Wechselrichters kein Netzladen abbricht.
+ * Ein Alter-Check entfällt bewusst: unveränderte HA-Werte erzeugen kein Event, sind also nicht veraltet.
  */
 @Component
 class HaSettingsReader(
@@ -31,14 +34,12 @@ class HaSettingsReader(
         }
     }
 
-    private fun requiredEntityIds(): List<EntityId> {
+    private fun requiredEntityIds(): List<EntityId> =
+        if (isSurplusChargeEnabled()) settingEntityIds() + surplusEntityIds() else settingEntityIds()
+
+    private fun settingEntityIds(): List<EntityId> {
         val entities = properties.ha.entities
         return listOf(
-            entities.pvPower,
-            entities.gridPower,
-            entities.batteryPower,
-            entities.securityBuffer,
-            entities.preferCarOverBattery,
             entities.pvSurplusCharge,
             entities.targetPhases,
             entities.targetCurrent,
@@ -47,19 +48,39 @@ class HaSettingsReader(
         )
     }
 
+    private fun surplusEntityIds(): List<EntityId> {
+        val entities = properties.ha.entities
+        return listOf(
+            entities.pvPower,
+            entities.gridPower,
+            entities.batteryPower,
+            entities.securityBuffer,
+            entities.preferCarOverBattery,
+        )
+    }
+
+    /** Ein fehlender Schalter gilt hier als „an“, damit die strengere Prüfung greift und er als fehlend gemeldet wird. */
+    private fun isSurplusChargeEnabled(): Boolean {
+        val surplusCharge = properties.ha.entities.pvSurplusCharge
+        return !isUsable(surplusCharge) || booleanOf(surplusCharge)
+    }
+
     private fun isUsable(entityId: EntityId): Boolean = states.state(entityId)?.isUsable() == true
 
     private fun readAll(): HaReadings {
         val entities = properties.ha.entities
         return HaReadings(
-            pvPower = wattOf(entities.pvPower),
-            gridPower = wattOf(entities.gridPower),
-            batteryPower = wattOf(entities.batteryPower),
-            securityBuffer = wattOf(entities.securityBuffer),
-            preferCarOverBattery = booleanOf(entities.preferCarOverBattery),
+            pvPower = wattOrNotMeasured(entities.pvPower),
+            gridPower = wattOrNotMeasured(entities.gridPower),
+            batteryPower = wattOrNotMeasured(entities.batteryPower),
+            securityBuffer = wattOrNotMeasured(entities.securityBuffer),
+            preferCarOverBattery = isUsable(entities.preferCarOverBattery) && booleanOf(entities.preferCarOverBattery),
             settings = readChargeSettings(),
         )
     }
+
+    private fun wattOrNotMeasured(entityId: EntityId): Watt =
+        if (isUsable(entityId)) wattOf(entityId) else NOT_MEASURED
 
     private fun readChargeSettings(): ChargeSettings {
         val entities = properties.ha.entities

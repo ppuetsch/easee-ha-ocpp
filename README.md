@@ -31,6 +31,8 @@ Die Freigabe entscheidet jetzt die Easee-Integration in HA: Whitelist unter Ease
 ## Dienstausfall
 - Das Limit gilt 2 min (`easee.ha.charger-limit-validity`, Standard 120 s; die Integration legt es als Profil auf Stack-Ebene 1 ab). Der Service erneuert es alle 60 s (`easee.control.profile-refresh-interval`). Danach gilt der OCPP-Maximalstrom der Integration (Stack-Ebene 0, auf 0 A gestellt), und die Ladung stoppt.
 - Fällt Home Assistant aus, gilt dasselbe: Die Charger behalten kein Limit über 2 min hinaus.
+- Fehlt nur ein Eingang aus HA (`unavailable`/`unknown`), erneuert der Service die zuletzt gesetzten Limits unverändert noch bis zu 5 min nach dem letzten vollständigen Zyklus (`easee.control.missing-input-hold`). Ein kurzer Sensoraussetzer beendet so keine Ladung. Erst danach läuft das Limit ab. Die Statusseite zeigt dann „letzte Limits werden gehalten“.
+- PV-, Netz- und Batterieleistung sind nur bei eingeschaltetem Überschussladen Pflichteingänge. Ist es aus, zählen fehlende Leistungswerte als 0 W; der Festwert wird normal gesetzt.
 - Der Start prüft, dass die Erneuerung kürzer ist als die Gültigkeit. Andernfalls bricht der Service mit einer Fehlermeldung ab.
 - **Einschränkung:** Dieses Verhalten gilt nur, solange der Charger die Profile behält. Nach einem Neustart des Chargers ist ungeprüft, ob er das Regelprofil noch hat oder wie er ohne Service reagiert.
 - Wie im Altskript wird nie unter `minimum_ev_current` geregelt; die Pausen-Hysterese greift daher nur bei Mindeststrom 0.

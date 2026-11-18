@@ -9,6 +9,7 @@ import de.puetsch.easeeocpp.domain.model.ChargerStatus
 import de.puetsch.easeeocpp.domain.model.ControlAction
 import de.puetsch.easeeocpp.domain.model.ControlDecision
 import de.puetsch.easeeocpp.domain.model.ChargerSnapshot
+import de.puetsch.easeeocpp.domain.model.EntityId
 import de.puetsch.easeeocpp.domain.model.PhaseMode
 import de.puetsch.easeeocpp.ha.HaConnectionProblemSource
 import de.puetsch.easeeocpp.ports.ActuationResult
@@ -19,6 +20,7 @@ import org.slf4j.LoggerFactory
 import org.springframework.context.SmartLifecycle
 import org.springframework.stereotype.Component
 import java.time.Clock
+import java.time.Duration
 import java.time.Instant
 import java.util.concurrent.Executors
 import java.util.concurrent.ScheduledExecutorService
@@ -32,6 +34,7 @@ const val OUTCOME_SENT = "gesendet"
 const val SKIP_HA_DISCONNECTED = "HA nicht verbunden"
 const val SKIP_HA_TOKEN_REJECTED = "HA-Token abgelehnt"
 const val SKIP_MISSING_INPUT_PREFIX = "Eingang fehlt: "
+const val HOLDING_LAST_LIMITS_NOTE = " – letzte Limits werden gehalten"
 
 internal const val OUTCOME_FAILED_PREFIX = "fehlgeschlagen: "
 private const val CONTROL_THREAD_NAME = "control-loop"
@@ -67,6 +70,7 @@ class ControlLoop(
     private val rampLimiter = RampLimiter(properties.control)
     private val phaseModeBackoff = PhaseModeRetryBackoff()
     private var scheduler: ScheduledExecutorService? = null
+    private var lastCompleteReadingAt: Instant? = null
 
     @Volatile
     private var running = false
@@ -100,11 +104,37 @@ class ControlLoop(
 
     private fun readAndEvaluate(now: Instant, snapshots: List<ChargerSnapshot>) {
         when (val reading = settingsReader.read()) {
-            is HaReadResult.MissingInput ->
-                publishSkipped(now, haConnected = true, snapshots, SKIP_MISSING_INPUT_PREFIX + reading.entityId)
+            is HaReadResult.MissingInput -> skipHoldingLastLimits(now, snapshots, reading.entityId)
 
-            is HaReadResult.Complete -> evaluateAndActuate(now, reading.readings, snapshots)
+            is HaReadResult.Complete -> {
+                lastCompleteReadingAt = now
+                evaluateAndActuate(now, reading.readings, snapshots)
+            }
         }
+    }
+
+    /**
+     * Ein kurz fehlender Eingang (z. B. ein Aussetzer des Wechselrichter-Sensors) soll keine laufende Ladung
+     * beenden: Innerhalb von `missingInputHold` nach dem letzten vollständigen Zyklus werden die zuletzt
+     * gesetzten Limits unverändert weiter erneuert. Danach läuft das Profil ab und die Ladung stoppt wie bisher.
+     */
+    private fun skipHoldingLastLimits(now: Instant, snapshots: List<ChargerSnapshot>, missingEntity: EntityId) {
+        val holding = isWithinMissingInputHold(now)
+        val actions = if (holding) refreshHeldLimitsIfDue(now) else emptyList()
+        actions.forEach(history::record)
+        val reason = SKIP_MISSING_INPUT_PREFIX + missingEntity + if (holding) HOLDING_LAST_LIMITS_NOTE else ""
+        publishSkipped(now, haConnected = true, snapshots, reason)
+    }
+
+    private fun isWithinMissingInputHold(now: Instant): Boolean {
+        val lastComplete = lastCompleteReadingAt ?: return false
+        return Duration.between(lastComplete, now) <= properties.control.missingInputHold
+    }
+
+    private fun refreshHeldLimitsIfDue(now: Instant): List<ControlAction> {
+        val heldLimits = tracker.lastLimits().map { (chargerId, current) -> ChargerLimit(chargerId, current) }
+        if (heldLimits.isEmpty()) return emptyList()
+        return limitActionsIfDue(now, heldLimits, limitsChanged = false)
     }
 
     private fun evaluateAndActuate(now: Instant, readings: HaReadings, snapshots: List<ChargerSnapshot>) {
